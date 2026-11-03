@@ -1,12 +1,5 @@
-function Button() {
+import { redirect } from 'next/navigation';
 
+export default function Home() {
+  redirect('/auth/login');
 }
-
-function page () {
-  return (
-    <div>
-    <button>A chambiar</button>
-    </div>
-  )
-}
-export default page
