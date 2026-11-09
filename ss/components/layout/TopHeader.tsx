@@ -1,23 +1,27 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from 'react';
+import { cerrarSesion } from '@/lib/cerrarSesion';
+import Link from 'next/link';
+import { useUsuario } from '@/lib/useUsuario';
+import BotonTema from '@/components/ui/BotonTema';
 
-export default function TopHeader() {
+export default function TopHeader({ onMenu }: { onMenu?: () => void }) {
   const [isOpen, setIsOpen] = useState(false);
-  const [role, setRole] = useState<'docente' | 'admin'>('docente');
-  const [userName, setUserName] = useState('Dra. Mónica Pérez Lara');
-  const [userEmail, setUserEmail] = useState('monica.perez@morelia.tecnm.mx');
+  const { usuario } = useUsuario();
+  const role = usuario?.rol ?? 'docente';
+  const userName = usuario?.nombre ?? '';
+  const userEmail = usuario?.correo ?? '';
+  const departamento = usuario?.departamento ?? '';
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const storedRole = localStorage.getItem('user_role') as 'docente' | 'admin';
-    const storedName = localStorage.getItem('user_name');
-    const storedEmail = localStorage.getItem('user_email');
+    const alEscape = (e: KeyboardEvent) => { if (e.key === 'Escape') setIsOpen(false); };
+    document.addEventListener('keydown', alEscape);
+    return () => document.removeEventListener('keydown', alEscape);
+  }, []);
 
-    if (storedRole) setRole(storedRole);
-    if (storedName) setUserName(storedName);
-    if (storedEmail) setUserEmail(storedEmail);
-
+  useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
         setIsOpen(false);
@@ -27,24 +31,28 @@ export default function TopHeader() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const handleLogout = () => {
-    localStorage.clear();
-    document.cookie = "user_role=; path=/; expires=Thu, 01 Jan 1970 00:00:00 UTC;";
-    window.location.href = '/auth/login';
-  };
+  const handleLogout = () => cerrarSesion();
 
   return (
-    <header className="h-16 bg-white border-b border-gray-100 px-8 flex items-center justify-between shrink-0 font-sans shadow-xs">
-      <div>
-        <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
-          Sistema de Gestión de la Calidad • ITMorelia
+    <header className="h-16 bg-white border-b border-gray-100 px-4 sm:px-8 flex items-center justify-between gap-3 shrink-0 font-sans shadow-xs sticky top-0 z-30">
+      <div className="flex items-center gap-3 min-w-0">
+        <button onClick={onMenu} aria-label="Abrir menú" className="lg:hidden p-2 -ml-2 rounded-lg text-[#0F3470] hover:bg-gray-100 cursor-pointer">
+          <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" /></svg>
+        </button>
+        <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider truncate">
+          <span className="hidden sm:inline">Sistema de Gestión Integrado • </span>ITMorelia
         </span>
       </div>
 
       {/* Menú de Usuario desplegable (Arriba a la Derecha) */}
+      <div className="flex items-center gap-2">
+      <BotonTema />
       <div className="relative" ref={dropdownRef}>
         <button
           onClick={() => setIsOpen(!isOpen)}
+          aria-haspopup="menu"
+          aria-expanded={isOpen}
+          aria-label="Menú de mi perfil"
           className="flex items-center space-x-3 p-1.5 rounded-full hover:bg-gray-50 border border-gray-200 transition-all cursor-pointer focus:outline-none"
         >
           <div className="w-8 h-8 rounded-full bg-[#0F3470] text-amber-400 font-bold flex items-center justify-center text-xs shadow-xs">
@@ -53,7 +61,7 @@ export default function TopHeader() {
           <div className="text-left hidden sm:block pr-1">
             <p className="text-xs font-bold text-gray-800 leading-tight">{userName}</p>
             <p className="text-[10px] text-gray-500 capitalize">
-              {role === 'admin' ? 'Coordinadora de Calidad (RD)' : 'Docente / Investigador'}
+              {role === 'admin' ? 'Administrador SGI' : 'Docente'}
             </p>
           </div>
           <svg className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -63,21 +71,23 @@ export default function TopHeader() {
 
         {/* Modal / Menú Desplegable de Información del Usuario */}
         {isOpen && (
-          <div className="absolute right-0 mt-2 w-72 bg-white rounded-2xl shadow-2xl border border-gray-100 py-2 z-50 animate-in fade-in slide-in-from-top-2 duration-150">
+          <div className="absolute right-0 mt-2 w-72 max-w-[calc(100vw-2rem)] bg-white rounded-2xl shadow-2xl border border-gray-100 py-2 z-50 anim-pop-top">
             <div className="px-4 py-3 border-b border-gray-100 bg-gray-50/50">
               <p className="text-xs font-bold text-gray-800">{userName}</p>
               <p className="text-[11px] text-gray-500 font-mono mt-0.5">{userEmail}</p>
               <div className="mt-2 inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold bg-blue-50 text-[#0F3470]">
-                {role === 'admin' ? '🛡️ Rol Administrador (SGC)' : '👨‍🏫 Rol Docente'}
+                {role === 'admin' ? '🛡️ Rol Administrador (SGI)' : '👨‍🏫 Rol Docente'}
               </div>
             </div>
 
             <div className="px-4 py-2 text-[11px] text-gray-500 space-y-1">
-              <p><span className="font-semibold text-gray-700">Departamento:</span> {role === 'admin' ? 'Dirección / Calidad' : 'Sistemas y Computación'}</p>
+              <p><span className="font-semibold text-gray-700">Departamento:</span> {departamento}</p>
+              <p><span className="font-semibold text-gray-700">Puesto:</span> {usuario?.puesto}</p>
               <p><span className="font-semibold text-gray-700">Plantel:</span> Instituto Tecnológico de Morelia</p>
             </div>
 
             <div className="border-t border-gray-100 mt-2 pt-1">
+              <Link href="/dashboard/cuenta" onClick={() => setIsOpen(false)} className="block w-full text-left px-4 py-3 sm:py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50">Mi perfil: datos y contraseña</Link>
               <button
                 onClick={handleLogout}
                 className="w-full text-left px-4 py-2 text-xs font-semibold text-red-600 hover:bg-red-50 flex items-center space-x-2 transition-colors cursor-pointer"
@@ -90,6 +100,7 @@ export default function TopHeader() {
             </div>
           </div>
         )}
+      </div>
       </div>
     </header>
   );

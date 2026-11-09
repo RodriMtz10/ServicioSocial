@@ -1,355 +1,383 @@
-"use client";
+'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { PaginaCargando } from '@/components/ui/Cargando';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { PlanAccionItem } from '@/types';
+import { Plus, Save, Send, Trash2, Undo2, Lock, Paperclip, ShieldCheck } from 'lucide-react';
+import ProgressSidebar from '@/components/requisiciones/ProgressSidebar';
+import { Ayuda, Campo, inputCls } from '@/components/ui/Campo';
+import { SelectCerrado } from '@/components/ui/ListasInstitucionales';
+import { RESPONSABLES_BASE } from '@/lib/institucional';
+import { aDatos, deRequisicion, filaPlan, validar, valoresVacios, type FormValues } from '@/lib/formulario';
+import { useRequisiciones } from '@/lib/store';
+import { useUsuario } from '@/lib/useUsuario';
+import { ESTADOS, fmtFecha, hoy, uid } from '@/lib/utils';
+import type { EstadoRequisicion } from '@/types';
 
-export default function FormularioRequisicion() {
+const draftKey = (userId: string) => `itm-ac:draft:${userId}`;
+
+function SiNo({ nombre, valor, onChange }: { nombre: string; valor: string; onChange: (v: 'si' | 'no') => void }) {
+  return (
+    <div className="inline-flex border border-gray-200 rounded-xl overflow-hidden" role="radiogroup">
+      {(['si', 'no'] as const).map((o) => (
+        <label key={o} className={`px-6 py-2 text-xs font-bold cursor-pointer select-none border-r last:border-r-0 border-gray-200 ${valor === o ? 'bg-[#0F3470] text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}>
+          <input type="radio" name={nombre} value={o} checked={valor === o} onChange={() => onChange(o)} className="sr-only" />
+          {o === 'si' ? 'Sí' : 'No'}
+        </label>
+      ))}
+    </div>
+  );
+}
+
+function Seccion({ id, n, titulo, children, derecha }: { id: string; n: number; titulo: string; children: React.ReactNode; derecha?: React.ReactNode }) {
+  return (
+    <section id={id} className="bg-white p-4 sm:p-6 rounded-2xl border border-gray-100 shadow-xs space-y-4 scroll-mt-6">
+      <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+        <h2 className="text-sm font-bold text-[#0F3470] flex items-center gap-2">
+          <span className="w-6 h-6 rounded-full bg-[#0F3470] text-white text-xs flex items-center justify-center">{n}</span>
+          <span className="uppercase">{titulo}</span>
+        </h2>
+        {derecha}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+export default function FormularioRequisicion({ id }: { id?: string }) {
   const router = useRouter();
-  
-  // Estado general del formulario
-  const [fechaRegistro, setFechaRegistro] = useState('2026-11-02');
-  const [folio] = useState('AC-ITM-2026-024');
-  const [descripcion, setDescripcion] = useState('');
-  const [responsableDefinir, setResponsableDefinir] = useState('Jefatura de Sistemas y Computación');
-  const [responsableVerificar, setResponsableVerificar] = useState('Subdirección Académica');
-  const [tecnicaEstadistica, setTecnicaEstadistica] = useState('Diagrama de Pareto');
-  const [causaRaiz, setCausaRaiz] = useState('');
-  const [accionRealizar, setAccionRealizar] = useState('');
-  const [observaciones, setObservaciones] = useState('');
+  const { usuario, esAdmin, cargando } = useUsuario();
+  const { ready, requisiciones, catalogos, personas, guardar, adminEditar } = useRequisiciones();
+  const responsables = useMemo(() => [...catalogos.responsables, ...RESPONSABLES_BASE], [catalogos.responsables]);
+  const existente = id ? requisiciones.find((r) => r.id === id) : undefined;
 
-  // Filas dinámicas del Plan de Acción
-  const [planAccion, setPlanAccion] = useState<PlanAccionItem[]>([
-    {
-      id: '1',
-      descripcion: 'Configurar recordatorios automáticos por correo',
-      responsable: 'Dra. Mónica Pérez Lara',
-      fechaProgramada: '2026-12-15',
-      evidencia: 'Captura de pantalla de configuración SII'
-    }
-  ]);
+  const [v, setV] = useState<FormValues | null>(null);
+  const [intento, setIntento] = useState(false);
+  const [guardadoEn, setGuardadoEn] = useState<string | null>(null);
+  const [guardando, setGuardando] = useState(false);
+  const iniciado = useRef(false);
 
-  // Manejo de Evidencias digitales
-  const [evidencias, setEvidencias] = useState<Array<{ id: number; nombre: string; tamaño: string }>>([
-    { id: 1, nombre: 'Evidencia_Inicial_SGC.pdf', tamaño: '1.1 MB' }
-  ]);
+  // Panel exclusivo del administrador (edición en cualquier estado).
+  const [estadoA, setEstadoA] = useState<EstadoRequisicion>('borrador');
+  const [cierreA, setCierreA] = useState({ causaEliminada: '' as '' | 'si' | 'no', observaciones: '', fechaCierre: '', firmaRD: '' });
+  const [motivo, setMotivo] = useState('');
+  const [errAdmin, setErrAdmin] = useState('');
 
-  const agregarFilaPlan = () => {
-    setPlanAccion([
-      ...planAccion,
-      {
-        id: Date.now().toString(),
-        descripcion: '',
-        responsable: 'Dra. Mónica Pérez Lara',
-        fechaProgramada: '',
-        evidencia: ''
-      }
-    ]);
-  };
+  const inicio = esAdmin ? '/dashboard/tablero' : '/dashboard/mis-solicitudes';
+  // El admin edita cualquier requisición, salvo su propio borrador/devuelta, que sigue el flujo normal de envío.
+  const modoAdmin = !!(esAdmin && existente && usuario && !(existente.solicitanteId === usuario.id && ['borrador', 'devuelta'].includes(existente.estado)));
 
-  const eliminarFilaPlan = (id: string) => {
-    if (planAccion.length === 1) {
-      alert('El plan de acción debe contener al menos una actividad.');
+  // Carga inicial: requisición existente → borrador local (solo nuevas) → vacío.
+  useEffect(() => {
+    if (!ready || !usuario || iniciado.current) return;
+    if (id && !existente) return;
+    iniciado.current = true;
+    if (existente) {
+      setV(deRequisicion(existente, catalogos.tecnicas));
+      setEstadoA(existente.estado);
+      setCierreA({ causaEliminada: existente.cierre ? (existente.cierre.causaEliminada ? 'si' : 'no') : '', observaciones: existente.cierre?.observaciones ?? '', fechaCierre: existente.cierre?.fechaCierre ?? '', firmaRD: existente.cierre?.firmaRD ?? '' });
       return;
     }
-    setPlanAccion(planAccion.filter(item => item.id !== id));
+    try {
+      const raw = localStorage.getItem(draftKey(usuario.id));
+      if (raw) { setV(JSON.parse(raw)); setGuardadoEn('restaurado'); return; }
+    } catch { /* ignorar */ }
+    setV(valoresVacios(usuario.nombre));
+  }, [ready, usuario, id, existente, catalogos.tecnicas]);
+
+  // Autoguardado local del borrador (solo requisiciones nuevas).
+  useEffect(() => {
+    if (id || !v || !usuario) return;
+    const t = setTimeout(() => {
+      try {
+        localStorage.setItem(draftKey(usuario.id), JSON.stringify(v));
+        setGuardadoEn(new Date().toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' }));
+      } catch { /* ignorar */ }
+    }, 800);
+    return () => clearTimeout(t);
+  }, [v, id, usuario]);
+
+  const todos = useMemo(() => (v ? validar(v) : {}), [v]);
+  const errores = intento ? todos : {};
+
+  if (cargando || !ready || !usuario) return <PaginaCargando />;
+  if (id && !existente) return <div className="p-10 text-center text-xs text-gray-500">No se encontró la requisición.</div>;
+  if (existente && !modoAdmin && (!['borrador', 'devuelta'].includes(existente.estado) || existente.solicitanteId !== usuario.id)) {
+    return (
+      <div className="max-w-md mx-auto bg-white p-8 rounded-2xl border border-gray-100 text-center space-y-3">
+        <p className="text-sm font-bold text-slate-900">Esta requisición ya no se puede editar</p>
+        <p className="text-xs text-gray-500">Solo se editan borradores o requisiciones devueltas por el SGI.</p>
+        <Link href={`/dashboard/requisiciones/${existente.id}`} className="inline-block px-4 py-2 bg-[#0F3470] text-white text-xs font-bold rounded-xl">Ver requisición</Link>
+      </div>
+    );
+  }
+  if (!v) return <PaginaCargando />;
+
+  const set = <K extends keyof FormValues>(k: K, val: FormValues[K]) => setV((p) => (p ? { ...p, [k]: val } : p));
+  const setFila = (i: number, patch: Partial<FormValues['planAccion'][number]>) =>
+    setV((p) => (p ? { ...p, planAccion: p.planAccion.map((f, j) => (j === i ? { ...f, ...patch } : f)) } : p));
+  const addFila = () => setV((p) => (p ? { ...p, planAccion: [...p.planAccion, filaPlan()] } : p));
+  const delFila = (i: number) =>
+    setV((p) => (p ? { ...p, planAccion: p.planAccion.length > 1 ? p.planAccion.filter((_, j) => j !== i) : [filaPlan()] } : p));
+
+  const subirEvidencia = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    setV((p) => (p ? { ...p, evidencias: [...p.evidencias, { id: uid(), nombre: f.name, tamano: `${Math.max(1, Math.round(f.size / 1024))} KB`, fecha: fmtFecha(hoy()) }] } : p));
+    e.target.value = '';
   };
 
-  const handleSubirEvidencia = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      const file = e.target.files[0];
-      setEvidencias([
-        ...evidencias,
-        {
-          id: Date.now(),
-          nombre: file.name,
-          tamaño: `${(file.size / 1024).toFixed(0)} KB`
-        }
-      ]);
-    }
+  const limpiarBorrador = () => { try { localStorage.removeItem(draftKey(usuario.id)); } catch { /* ignorar */ } };
+
+  const irAlDetalle = (rid: string) => router.push(`/dashboard/requisiciones/${rid}`);
+  const irAlPrimerError = () => setTimeout(() => document.querySelector('[data-invalid="true"]')?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 30);
+
+  const onBorrador = async () => {
+    if (guardando) return;
+    setGuardando(true);
+    const r = await guardar(aDatos(v), id, false);
+    setGuardando(false);
+    if (r) { limpiarBorrador(); irAlDetalle(r.id); }
   };
 
-  const handleEliminarEvidencia = (id: number) => {
-    setEvidencias(evidencias.filter(ev => ev.id !== id));
+  const onEnviar = async () => {
+    if (guardando) return;
+    setIntento(true);
+    if (Object.keys(todos).length) { irAlPrimerError(); return; }
+    setGuardando(true);
+    const r = await guardar(aDatos(v), id, true);
+    setGuardando(false);
+    if (r) { limpiarBorrador(); irAlDetalle(r.id); }
   };
 
-  const handleGuardar = (esBorrador: boolean) => {
-    if (!esBorrador && !descripcion.trim()) {
-      alert('Por favor describe la No Conformidad antes de enviar la requisición oficial.');
+  const onAdminGuardar = async () => {
+    if (guardando || !id) return;
+    setIntento(true);
+    setErrAdmin('');
+    // Una requisición activa debe estar completa; solo borrador/devuelta admiten datos a medias.
+    if (!['borrador', 'devuelta'].includes(estadoA) && Object.keys(todos).length) { irAlPrimerError(); return; }
+    if (estadoA === 'cerrada' && (!cierreA.causaEliminada || !cierreA.fechaCierre || !cierreA.firmaRD.trim())) {
+      setErrAdmin('Para dejarla cerrada indica si se eliminó la causa raíz, la fecha de cierre y la firma del RD.');
       return;
     }
-
-    const mensaje = esBorrador 
-      ? `Requisición ${folio} guardada exitosamente en borrador.` 
-      : `Requisición ${folio} enviada oficialmente al Sistema de Gestión de la Calidad.`;
-    
-    alert(mensaje);
-    router.push('/dashboard/mis-solicitudes');
+    setGuardando(true);
+    const r = await adminEditar(id, {
+      datos: aDatos(v),
+      estado: estadoA,
+      cierre: { causaEliminada: cierreA.causaEliminada === '' ? null : cierreA.causaEliminada === 'si', observaciones: cierreA.observaciones.trim(), fechaCierre: cierreA.fechaCierre, firmaRD: cierreA.firmaRD.trim() },
+      motivo: motivo.trim() || undefined,
+    });
+    setGuardando(false);
+    if (r) irAlDetalle(r.id);
   };
+
+  const devolucion = existente?.estado === 'devuelta' ? [...existente.historial].reverse().find((e) => e.tipo === 'devuelta' || e.tipo === 'reabierta') : undefined;
+  const folio = existente?.folio ?? 'Se asigna al guardar';
 
   return (
-    <div className="max-w-4xl mx-auto bg-white p-8 rounded-2xl shadow-sm border border-gray-100 font-sans space-y-8">
-      {/* Encabezado */}
-      <div className="border-b border-gray-100 pb-5 flex justify-between items-start">
-        <div>
-          <h1 className="text-xl font-bold text-[#0F3470]">Requisición de Acciones Correctivas</h1>
-          <p className="text-xs text-gray-500 mt-0.5">Formato Oficial ITMORELIA-IT-CA-004-01</p>
-        </div>
-        <span className="px-3 py-1 bg-blue-50 text-[#0F3470] font-mono font-bold text-xs rounded-lg border border-blue-100">
-          {folio}
-        </span>
-      </div>
+    <div className="max-w-6xl mx-auto flex gap-6 items-start font-sans pb-24 pt-9 lg:pt-0">
+      <ProgressSidebar errores={todos} />
 
-      {/* Bloque 1: Solicitud */}
-      <div className="space-y-4">
-        <h2 className="text-sm font-bold text-[#0F3470] flex items-center space-x-2">
-          <span className="w-6 h-6 rounded-full bg-[#0F3470] text-white text-xs flex items-center justify-center">1</span>
-          <span>SOLICITUD Y DETECCIÓN DE NO CONFORMIDAD</span>
-        </h2>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="flex-1 min-w-0 space-y-5">
+        <div className="flex flex-wrap justify-between items-start gap-2">
           <div>
-            <label className="block text-xs font-bold text-gray-600 mb-1">Fecha de Registro</label>
-            <input
-              type="date"
-              value={fechaRegistro}
-              onChange={(e) => setFechaRegistro(e.target.value)}
-              className="w-full text-xs p-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#0F3470] outline-none"
-            />
+            <h1 className="text-xl font-bold text-[#0F3470]">Requisición de Acciones Correctivas</h1>
+            <p className="text-xs text-gray-500 mt-0.5">Sistema de Gestión Integrado • Formato ITMORELIA-IT-CA-004-01</p>
           </div>
-          <div>
-            <label className="block text-xs font-bold text-gray-600 mb-1">Folio (Auto-generado)</label>
-            <input
-              type="text"
-              readOnly
-              value={folio}
-              className="w-full text-xs p-2.5 bg-gray-50 border border-gray-200 rounded-xl font-mono text-gray-500 cursor-not-allowed"
-            />
+          <span className="px-3 py-1 bg-blue-50 text-[#0F3470] font-mono font-bold text-xs rounded-lg border border-blue-100">{folio}</span>
+        </div>
+
+        {modoAdmin && (
+          <div className="flex gap-3 p-4 bg-violet-50 border border-violet-200 rounded-xl text-violet-900">
+            <ShieldCheck size={18} className="shrink-0 mt-0.5" />
+            <div><p className="text-xs font-bold">Edición del administrador</p><p className="text-xs mt-0.5">Puedes modificar cualquier campo en cualquier estado. Cada cambio queda registrado en el historial con tu nombre.</p></div>
           </div>
-        </div>
+        )}
 
-        <div>
-          <label className="block text-xs font-bold text-gray-600 mb-1">Descripción de la No Conformidad Detectada *</label>
-          <textarea
-            rows={3}
-            value={descripcion}
-            onChange={(e) => setDescripcion(e.target.value)}
-            placeholder="Escriba a detalle la falla o desviación encontrada..."
-            className="w-full text-xs p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#0F3470] outline-none"
-          />
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label className="block text-xs font-bold text-gray-600 mb-1">Responsable de definir la acción</label>
-            <input
-              type="text"
-              value={responsableDefinir}
-              onChange={(e) => setResponsableDefinir(e.target.value)}
-              className="w-full text-xs p-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#0F3470] outline-none"
-            />
+        {devolucion && (
+          <div className="flex gap-3 p-4 bg-red-50 border border-red-200 rounded-xl text-red-800">
+            <Undo2 size={18} className="shrink-0 mt-0.5" />
+            <div><p className="text-xs font-bold">El SGI devolvió esta requisición</p><p className="text-xs mt-0.5">{devolucion.comentario}</p></div>
           </div>
-          <div>
-            <label className="block text-xs font-bold text-gray-600 mb-1">Responsable de verificar implantación</label>
-            <input
-              type="text"
-              value={responsableVerificar}
-              onChange={(e) => setResponsableVerificar(e.target.value)}
-              className="w-full text-xs p-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#0F3470] outline-none"
-            />
+        )}
+
+        {/* 1. SOLICITUD */}
+        <Seccion id="s1" n={1} titulo="Solicitud y detección de no conformidad">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Campo label="Fecha de registro" num={1}>
+              <input readOnly value={fmtFecha(existente?.fechaRegistro ?? hoy(), { day: '2-digit', month: 'long', year: 'numeric' })} className={`${inputCls()} bg-gray-50 text-gray-600`} />
+            </Campo>
+            <Campo label="Folio (auto-generado)" num={2}>
+              <input readOnly value={folio} className={`${inputCls()} bg-blue-50 font-mono font-bold text-[#0F3470] border-blue-100`} />
+            </Campo>
           </div>
-        </div>
-      </div>
+          <Campo id="descripcion" label="Descripción de la no conformidad detectada *" num={4} error={errores.descripcion}>
+            <textarea rows={4} value={v.descripcion} onChange={(e) => set('descripcion', e.target.value)} placeholder="Describe qué ocurrió, dónde, cuándo y con qué evidencia se detectó." className={inputCls(errores.descripcion)} />
+          </Campo>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Campo id="responsableDefinir" label="Responsable de definir la acción correctiva" error={errores.responsableDefinir}>
+              <SelectCerrado value={v.responsableDefinir} onChange={(x) => set('responsableDefinir', x)} opciones={responsables} placeholder="Selecciona…" clase={inputCls(errores.responsableDefinir)} />
+            </Campo>
+            <Campo id="responsableVerificar" label="Responsable de verificar la implantación" error={errores.responsableVerificar}>
+              <SelectCerrado value={v.responsableVerificar} onChange={(x) => set('responsableVerificar', x)} opciones={responsables} placeholder="Selecciona…" clase={inputCls(errores.responsableVerificar)} />
+            </Campo>
+          </div>
+        </Seccion>
 
-      {/* Bloque 2: Análisis de Causa Raíz */}
-      <div className="space-y-4 pt-4 border-t border-gray-100">
-        <h2 className="text-sm font-bold text-[#0F3470] flex items-center space-x-2">
-          <span className="w-6 h-6 rounded-full bg-[#0F3470] text-white text-xs flex items-center justify-center">2</span>
-          <span>ANÁLISIS DE CAUSA RAÍZ Y ACCIÓN A REALIZAR</span>
-        </h2>
+        {/* 2. DICTAMEN */}
+        <Seccion id="s2" n={2} titulo="Dictamen del reporte y diagnóstico">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Campo id="requiereAC" label="¿Requiere acción correctiva?" num={5} error={errores.requiereAC}>
+              <SiNo nombre="ac" valor={v.requiereAC} onChange={(x) => set('requiereAC', x)} />
+            </Campo>
+            <Campo id="requiereCorreccion" label="¿Requiere corrección?" num={5} error={errores.requiereCorreccion}>
+              <SiNo nombre="corr" valor={v.requiereCorreccion} onChange={(x) => set('requiereCorreccion', x)} />
+            </Campo>
+          </div>
+        </Seccion>
 
-        <div>
-          <label className="block text-xs font-bold text-gray-600 mb-1">Técnica Estadística Utilizada</label>
-          <select
-            value={tecnicaEstadistica}
-            onChange={(e) => setTecnicaEstadistica(e.target.value)}
-            className="w-full text-xs p-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#0F3470] outline-none"
-          >
-            <option>Diagrama de Pareto</option>
-            <option>Diagrama Causa-Efecto (Ishikawa / Pescado)</option>
-            <option>Lluvia de ideas (5 Porqués)</option>
-            <option>Histograma</option>
-          </select>
-        </div>
+        {/* 3. ANÁLISIS */}
+        <Seccion id="s3" n={3} titulo="Análisis de causa raíz">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Campo id="tecnicaSel" label="Técnica estadística utilizada" num={6} error={errores.tecnicaSel}>
+              <select value={v.tecnicaSel} onChange={(e) => set('tecnicaSel', e.target.value)} className={inputCls(errores.tecnicaSel)}>
+                <option value="">Selecciona…</option>
+                {catalogos.tecnicas.map((t) => <option key={t}>{t}</option>)}
+                {!catalogos.tecnicas.includes('Otra') && <option>Otra</option>}
+              </select>
+            </Campo>
+            {v.tecnicaSel === 'Otra' && (
+              <Campo id="tecnicaOtra" label="Especifica la técnica" error={errores.tecnicaOtra}>
+                <input value={v.tecnicaOtra} onChange={(e) => set('tecnicaOtra', e.target.value)} className={inputCls(errores.tecnicaOtra)} />
+              </Campo>
+            )}
+          </div>
+          <Campo id="causaRaiz" label="Causa raíz identificada" num={6} error={errores.causaRaiz}>
+            <textarea rows={3} value={v.causaRaiz} onChange={(e) => set('causaRaiz', e.target.value)} placeholder="¿Cuál es la causa de fondo que originó la no conformidad?" className={inputCls(errores.causaRaiz)} />
+          </Campo>
+          <Campo id="accionRealizar" label="Acción correctiva o corrección a realizar" num={7} error={errores.accionRealizar}>
+            <textarea rows={3} value={v.accionRealizar} onChange={(e) => set('accionRealizar', e.target.value)} className={inputCls(errores.accionRealizar)} />
+          </Campo>
+        </Seccion>
 
-        <div>
-          <label className="block text-xs font-bold text-gray-600 mb-1">Causa Raíz Identificada</label>
-          <textarea
-            rows={2}
-            value={causaRaiz}
-            onChange={(e) => setCausaRaiz(e.target.value)}
-            placeholder="Resultado del análisis de causa raíz..."
-            className="w-full text-xs p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#0F3470] outline-none"
-          />
-        </div>
-
-        <div>
-          <label className="block text-xs font-bold text-gray-600 mb-1">Acción Correctiva o Corrección a Realizar</label>
-          <input
-            type="text"
-            value={accionRealizar}
-            onChange={(e) => setAccionRealizar(e.target.value)}
-            placeholder="Acción concreta acordada"
-            className="w-full text-xs p-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#0F3470] outline-none"
-          />
-        </div>
-      </div>
-
-      {/* Bloque 3: Plan de Acción */}
-      <div className="space-y-4 pt-4 border-t border-gray-100">
-        <div className="flex justify-between items-center">
-          <h2 className="text-sm font-bold text-[#0F3470] flex items-center space-x-2">
-            <span className="w-6 h-6 rounded-full bg-[#0F3470] text-white text-xs flex items-center justify-center">3</span>
-            <span>PLAN DE ACCIÓN (ACTIVIDADES CLAVE)</span>
-          </h2>
-          <button
-            type="button"
-            onClick={agregarFilaPlan}
-            className="text-xs font-bold text-blue-600 hover:text-blue-800 bg-blue-50 px-3 py-1.5 rounded-lg border border-blue-100 transition-colors cursor-pointer"
-          >
-            + Agregar Actividad
-          </button>
-        </div>
-
-        <div className="space-y-3">
-          {planAccion.map((item, index) => (
-            <div key={item.id} className="p-4 bg-gray-50 rounded-xl border border-gray-200 grid grid-cols-1 md:grid-cols-4 gap-3 items-center">
-              <div className="md:col-span-2">
-                <label className="block text-[10px] font-bold text-gray-400 uppercase">Actividad #{index + 1}</label>
-                <input
-                  type="text"
-                  value={item.descripcion}
-                  onChange={(e) => {
-                    const newPlan = [...planAccion];
-                    newPlan[index].descripcion = e.target.value;
-                    setPlanAccion(newPlan);
-                  }}
-                  placeholder="Descripción de la tarea"
-                  className="w-full text-xs p-2 border border-gray-200 rounded-lg bg-white mt-1"
-                />
-              </div>
-              <div>
-                <label className="block text-[10px] font-bold text-gray-400 uppercase">Fecha Programada</label>
-                <input
-                  type="date"
-                  value={item.fechaProgramada}
-                  onChange={(e) => {
-                    const newPlan = [...planAccion];
-                    newPlan[index].fechaProgramada = e.target.value;
-                    setPlanAccion(newPlan);
-                  }}
-                  className="w-full text-xs p-2 border border-gray-200 rounded-lg bg-white mt-1"
-                />
-              </div>
-              <div className="flex items-end justify-between space-x-2">
-                <div className="flex-1">
-                  <label className="block text-[10px] font-bold text-gray-400 uppercase">Evidencia</label>
-                  <input
-                    type="text"
-                    value={item.evidencia}
-                    onChange={(e) => {
-                      const newPlan = [...planAccion];
-                      newPlan[index].evidencia = e.target.value;
-                      setPlanAccion(newPlan);
-                    }}
-                    placeholder="Documento/Captura"
-                    className="w-full text-xs p-2 border border-gray-200 rounded-lg bg-white mt-1"
-                  />
+        {/* 4. PLAN */}
+        <Seccion id="s4" n={4} titulo="Plan de acción"
+          derecha={<button type="button" onClick={addFila} className="flex items-center gap-1 text-xs font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-lg border border-blue-100 cursor-pointer"><Plus size={14} /> Agregar acción</button>}>
+          {v.requiereAC === 'no' && v.requiereCorreccion === 'no' && (
+            <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800">Marcaste que no se requiere acción correctiva ni corrección. Cambia el dictamen en la sección 2 para poder enviar.</div>
+          )}
+          <div className="hidden md:grid grid-cols-[2.2fr_1.4fr_1.1fr_1.7fr_32px] gap-2 text-[10px] font-bold uppercase tracking-wider text-gray-400 px-1">
+            <span>Acción<Ayuda num={8} /></span><span>Responsable<Ayuda num={9} /></span><span>Fecha programada<Ayuda num={10} /></span><span>Evidencia<Ayuda num={11} /></span><span />
+          </div>
+          <div className="space-y-2">
+            {v.planAccion.map((f, i) => {
+              const e = (k: string) => errores[`planAccion.${i}.${k}`];
+              const malo = ['accion', 'responsable', 'fechaProgramada', 'evidencia'].some((k) => e(k));
+              return (
+                <div key={f.id} data-invalid={malo ? 'true' : undefined} className="grid grid-cols-1 md:grid-cols-[2.2fr_1.4fr_1.1fr_1.7fr_32px] gap-2 p-2 bg-gray-50 border border-gray-200 rounded-xl items-start">
+                  <textarea aria-label={`Acción ${i + 1}`} rows={2} value={f.accion} onChange={(ev) => setFila(i, { accion: ev.target.value })} placeholder="Acción específica" className={inputCls(e('accion'))} />
+                  <SelectCerrado aria-label={`Responsable ${i + 1}`} value={f.responsable} onChange={(x) => setFila(i, { responsable: x })} opciones={personas} placeholder="Responsable…" clase={inputCls(e('responsable'))} />
+                  <input aria-label={`Fecha ${i + 1}`} type="date" min={modoAdmin ? undefined : existente?.fechaRegistro ?? hoy()} value={f.fechaProgramada} onChange={(ev) => setFila(i, { fechaProgramada: ev.target.value })} className={inputCls(e('fechaProgramada'))} />
+                  <input aria-label={`Evidencia ${i + 1}`} value={f.evidencia} onChange={(ev) => setFila(i, { evidencia: ev.target.value })} placeholder="Qué se entregará" className={inputCls(e('evidencia'))} />
+                  <button type="button" onClick={() => delFila(i)} aria-label={`Quitar acción ${i + 1}`} className="p-2 text-red-500 hover:bg-red-50 rounded-lg cursor-pointer"><Trash2 size={15} /></button>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => eliminarFilaPlan(item.id)}
-                  className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
-                  title="Eliminar actividad"
-                >
-                  🗑️
+              );
+            })}
+          </div>
+          {errores.planAccion && <p className="text-[11px] font-semibold text-red-600">{errores.planAccion}</p>}
+          {Object.keys(errores).some((k) => k.startsWith('planAccion.')) && <p className="text-[11px] font-semibold text-red-600">Completa todos los campos de cada acción del plan.</p>}
+
+          <div className="pt-3 border-t border-gray-100">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-xs font-bold text-gray-600">Archivos de evidencia (opcional)</p>
+              <label className="flex items-center gap-1 text-xs font-bold text-[#0F3470] bg-amber-400/20 hover:bg-amber-400/30 px-3 py-1.5 rounded-lg border border-amber-300 cursor-pointer">
+                <Paperclip size={13} /> Adjuntar archivo
+                <input type="file" onChange={subirEvidencia} className="hidden" />
+              </label>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {v.evidencias.map((ev) => (
+                <div key={ev.id} className="p-2.5 bg-gray-50 rounded-xl border border-gray-200 flex items-center justify-between">
+                  <div className="min-w-0"><p className="text-xs font-bold text-gray-800 truncate">{ev.nombre}</p><p className="text-[10px] text-gray-400">{ev.tamano}</p></div>
+                  <button type="button" onClick={() => set('evidencias', v.evidencias.filter((x) => x.id !== ev.id))} className="text-xs font-bold text-red-500 hover:text-red-700 p-1 cursor-pointer">Quitar</button>
+                </div>
+              ))}
+            </div>
+            <p className="text-[10px] text-gray-400 mt-1.5">Por ahora solo se registra el nombre del archivo; la subida real al servidor es una fase posterior.</p>
+          </div>
+        </Seccion>
+
+        {/* 5. CIERRE */}
+        <Seccion id="s5" n={5} titulo="Cierre y firmas del formato">
+          <div className="flex gap-3 p-4 bg-blue-50 border border-blue-100 rounded-xl text-blue-900">
+            <Lock size={16} className="shrink-0 mt-0.5" />
+            <div className="text-xs"><p className="font-bold">Eficacia y cierre los registra el SGI</p>
+              <p className="mt-0.5">Los campos (12) “Se eliminó la causa raíz”, (13) observaciones de eficacia, (16) fecha de cierre y firma del RD se capturan al verificar la requisición. No tienes que llenarlos.</p></div>
+          </div>
+          <Campo label="Observaciones del solicitante (opcional)">
+            <textarea rows={2} value={v.observacionesDocente} onChange={(e) => set('observacionesDocente', e.target.value)} placeholder="Comentarios adicionales para la coordinación de calidad…" className={inputCls()} />
+          </Campo>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Campo id="definio" label="Definió la AC o corrección" num={14} error={errores.definio}>
+              <SelectCerrado value={v.definio} onChange={(x) => set('definio', x)} opciones={personas} placeholder="Selecciona…" clase={inputCls(errores.definio)} />
+            </Campo>
+            <Campo id="verifico" label="Verificó la AC o corrección" num={15} error={errores.verifico}>
+              <SelectCerrado value={v.verifico} onChange={(x) => set('verifico', x)} opciones={[...responsables, ...personas]} placeholder="Selecciona…" clase={inputCls(errores.verifico)} />
+            </Campo>
+          </div>
+        </Seccion>
+
+        {modoAdmin && (
+          <Seccion id="s6" n={6} titulo="Control del administrador">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Campo label="Estado de la requisición">
+                <select value={estadoA} onChange={(e) => setEstadoA(e.target.value as EstadoRequisicion)} className={inputCls()}>
+                  {(Object.keys(ESTADOS) as EstadoRequisicion[]).map((k) => <option key={k} value={k}>{ESTADOS[k].label}</option>)}
+                </select>
+              </Campo>
+              <Campo label="Motivo del cambio (queda en el historial)">
+                <input value={motivo} onChange={(e) => setMotivo(e.target.value)} maxLength={1000} placeholder="Ej. Corrección de fecha solicitada por el docente" className={inputCls()} />
+              </Campo>
+            </div>
+            <p className="text-[11px] font-bold text-gray-500 uppercase tracking-wider pt-2">Eficacia y cierre</p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Campo label="¿Se eliminó la causa raíz?" num={12}>
+                <div className="inline-flex border border-gray-200 rounded-xl overflow-hidden" role="radiogroup">
+                  {([['', '—'], ['si', 'Sí'], ['no', 'No']] as const).map(([o, t]) => (
+                    <label key={o} className={`px-5 py-2 text-xs font-bold cursor-pointer border-r last:border-r-0 border-gray-200 ${cierreA.causaEliminada === o ? 'bg-[#0F3470] text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}>
+                      <input type="radio" name="eliminadaAdmin" className="sr-only" checked={cierreA.causaEliminada === o} onChange={() => setCierreA({ ...cierreA, causaEliminada: o })} />{t}
+                    </label>
+                  ))}
+                </div>
+              </Campo>
+              <Campo label="Fecha de cierre" num={16}><input type="date" value={cierreA.fechaCierre} onChange={(e) => setCierreA({ ...cierreA, fechaCierre: e.target.value })} className={inputCls()} /></Campo>
+              <Campo label="Observaciones de eficacia" num={13}><textarea rows={2} value={cierreA.observaciones} onChange={(e) => setCierreA({ ...cierreA, observaciones: e.target.value })} className={inputCls()} /></Campo>
+              <Campo label="Nombre y firma RD" num={16}><input value={cierreA.firmaRD} onChange={(e) => setCierreA({ ...cierreA, firmaRD: e.target.value })} className={inputCls()} /></Campo>
+            </div>
+            {errAdmin && <p role="alert" className="text-[11px] font-semibold text-red-600">{errAdmin}</p>}
+          </Seccion>
+        )}
+
+
+        <div className="sticky bottom-0 -mx-2 px-3 sm:px-4 py-3 bg-white/95 backdrop-blur border-t border-gray-100 flex flex-wrap items-center justify-between gap-3 z-20">
+          <span className="text-[11px] text-gray-400">
+            {modoAdmin ? 'Edición del administrador' : id ? 'Edición de requisición existente' : guardadoEn === 'restaurado' ? 'Borrador local restaurado' : guardadoEn ? `Borrador local guardado a las ${guardadoEn}` : 'Se guarda automáticamente en este equipo'}
+          </span>
+          <div className="flex flex-wrap gap-2 w-full sm:w-auto [&>button]:flex-1 sm:[&>button]:flex-none [&>button]:justify-center">
+            <button type="button" onClick={() => router.push(id ? `/dashboard/requisiciones/${id}` : inicio)} className="px-4 py-2.5 rounded-xl border border-gray-300 text-xs font-bold text-gray-600 hover:bg-gray-50 cursor-pointer">Cancelar</button>
+            {modoAdmin ? (
+              <button type="button" disabled={guardando} onClick={onAdminGuardar} className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-[#0F3470] text-white text-xs font-bold hover:bg-[#0A2552] shadow-md cursor-pointer disabled:opacity-60"><Save size={14} /> {guardando ? 'Guardando…' : 'Guardar cambios'}</button>
+            ) : (
+              <>
+                <button type="button" disabled={guardando} onClick={onBorrador} className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-[#0F3470] text-[#0F3470] text-xs font-bold hover:bg-blue-50 cursor-pointer disabled:opacity-60"><Save size={14} /> Guardar borrador</button>
+                <button type="button" disabled={guardando} onClick={onEnviar} className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-[#0F3470] text-white text-xs font-bold hover:bg-[#0A2552] shadow-md cursor-pointer disabled:opacity-60">
+                  <Send size={14} /> {guardando ? 'Guardando…' : existente?.estado === 'devuelta' ? 'Reenviar requisición' : 'Enviar requisición oficial'}
                 </button>
-              </div>
-            </div>
-          ))}
+              </>
+            )}
+          </div>
         </div>
-      </div>
-
-      {/* Bloque 4: Evidencias Digitales */}
-      <div className="space-y-4 pt-4 border-t border-gray-100">
-        <div className="flex justify-between items-center">
-          <h2 className="text-sm font-bold text-[#0F3470] flex items-center space-x-2">
-            <span className="w-6 h-6 rounded-full bg-[#0F3470] text-white text-xs flex items-center justify-center">4</span>
-            <span>ARCHIVOS Y EVIDENCIAS ADJUNTAS</span>
-          </h2>
-          <label className="text-xs font-bold text-[#0F3470] bg-amber-400/20 hover:bg-amber-400/30 px-3 py-1.5 rounded-lg border border-amber-300 transition-colors cursor-pointer">
-            + Subir Archivo
-            <input type="file" onChange={handleSubirEvidencia} className="hidden" />
-          </label>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          {evidencias.map((ev) => (
-            <div key={ev.id} className="p-3 bg-gray-50 rounded-xl border border-gray-200 flex items-center justify-between">
-              <div className="flex items-center space-x-2 overflow-hidden">
-                <span className="text-base">📄</span>
-                <div className="truncate">
-                  <p className="text-xs font-bold text-gray-800 truncate">{ev.nombre}</p>
-                  <p className="text-[10px] text-gray-400">{ev.tamaño}</p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => handleEliminarEvidencia(ev.id)}
-                className="text-xs font-bold text-red-500 hover:text-red-700 p-1"
-              >
-                Eliminar
-              </button>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Observaciones */}
-      <div>
-        <label className="block text-xs font-bold text-gray-600 mb-1">Observaciones Opcionales</label>
-        <input
-          type="text"
-          value={observaciones}
-          onChange={(e) => setObservaciones(e.target.value)}
-          placeholder="Comentarios adicionales para la coordinación de calidad..."
-          className="w-full text-xs p-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#0F3470] outline-none"
-        />
-      </div>
-
-      {/* Botones de Acción principales */}
-      <div className="pt-6 border-t border-gray-100 flex flex-col sm:flex-row justify-end space-y-3 sm:space-y-0 sm:space-x-3">
-        <button
-          type="button"
-          onClick={() => router.push('/dashboard/mis-solicitudes')}
-          className="px-5 py-2.5 rounded-xl border border-gray-300 text-xs font-bold text-gray-600 hover:bg-gray-50 transition-colors cursor-pointer"
-        >
-          Cancelar
-        </button>
-        <button
-          type="button"
-          onClick={() => handleGuardar(true)}
-          className="px-5 py-2.5 rounded-xl border border-[#0F3470] text-[#0F3470] text-xs font-bold hover:bg-blue-50 transition-colors cursor-pointer"
-        >
-          Guardar Borrador
-        </button>
-        <button
-          type="button"
-          onClick={() => handleGuardar(false)}
-          className="px-6 py-2.5 rounded-xl bg-[#0F3470] text-white text-xs font-bold hover:bg-[#0A2552] transition-colors shadow-md cursor-pointer"
-        >
-          Enviar Requisición Oficial
-        </button>
       </div>
     </div>
   );

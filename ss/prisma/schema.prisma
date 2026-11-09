@@ -1,0 +1,198 @@
+// Esquema de la base de datos PostgreSQL (Prisma 7).
+// La URL de conexión NO va aquí: se define en prisma.config.ts (variable DATABASE_URL).
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Rol {
+  docente
+  admin
+}
+
+/// Ciclo de vida: borrador → pendiente → en_proceso → verificacion → cerrada
+/// ("devuelta" cuando el SGI pide correcciones).
+enum Estado {
+  borrador
+  pendiente
+  devuelta
+  en_proceso
+  verificacion
+  cerrada
+}
+
+enum TipoEvento {
+  creada
+  enviada
+  devuelta
+  aprobada
+  avance
+  verificacion
+  cerrada
+  reabierta
+  editada
+}
+
+enum TipoCatalogo {
+  departamento
+  tecnica
+  responsable
+}
+
+model Usuario {
+  id               String        @id @default(cuid())
+  nombre           String
+  correo           String        @unique
+  passwordHash     String
+  rol              Rol           @default(docente)
+  departamento     String
+  puesto           String
+  activo           Boolean       @default(true)
+  intentosFallidos Int           @default(0)
+  bloqueadoHasta   DateTime?
+  /// Se actualiza al cambiar la contraseña: las sesiones emitidas antes de esta fecha dejan de valer.
+  credencialesActualizadas DateTime @default(now())
+  creado           DateTime      @default(now())
+  actualizado      DateTime      @updatedAt
+  requisiciones    Requisicion[]
+  eventos          Evento[]
+
+  @@map("usuarios")
+}
+
+/// Un registro por año para asignar folios consecutivos de forma atómica (AC-ITM-AAAA-NNN).
+model Contador {
+  anio   Int @id
+  ultimo Int @default(0)
+
+  @@map("contadores_folio")
+}
+
+model Requisicion {
+  id     String @id @default(cuid())
+  anio   Int
+  numero Int
+  folio  String @unique
+
+  fechaRegistro DateTime @db.Date
+  estado        Estado   @default(borrador)
+
+  solicitanteId     String
+  solicitante       Usuario @relation(fields: [solicitanteId], references: [id], onDelete: Restrict)
+  /// Copia del nombre y departamento al momento de crear (el historial no cambia si luego se edita el usuario).
+  solicitanteNombre String
+  departamento      String
+
+  // (4) Solicitud
+  descripcion          String @default("")
+  responsableDefinir   String @default("")
+  responsableVerificar String @default("")
+
+  // (5) Dictamen
+  requiereAC         Boolean?
+  requiereCorreccion Boolean?
+
+  // (6)(7) Análisis
+  tecnicaEstadistica String @default("")
+  causaRaiz          String @default("")
+  accionRealizar     String @default("")
+
+  // (13) del solicitante, (14)(15) firmas
+  observacionesDocente String @default("")
+  definio              String @default("")
+  verifico             String @default("")
+
+  // (12)(13)(16) Cierre: lo captura el RD
+  causaEliminada Boolean?
+  obsEficacia    String?
+  fechaCierre    DateTime? @db.Date
+  firmaRD        String?
+
+  creada      DateTime @default(now())
+  actualizada DateTime @updatedAt
+
+  acciones   AccionPlan[]
+  evidencias Evidencia[]
+  eventos    Evento[]
+
+  @@unique([anio, numero])
+  @@index([solicitanteId])
+  @@index([estado])
+  @@map("requisiciones")
+}
+
+/// Filas del plan de acción (8)(9)(10)(11).
+model AccionPlan {
+  id              String      @id @default(cuid())
+  requisicionId   String
+  requisicion     Requisicion @relation(fields: [requisicionId], references: [id], onDelete: Cascade)
+  orden           Int
+  accion          String
+  responsable     String
+  fechaProgramada DateTime?   @db.Date
+  evidencia       String
+  completado      Boolean     @default(false)
+
+  @@index([requisicionId])
+  @@map("acciones_plan")
+}
+
+/// Solo metadatos del archivo. El almacenamiento real de archivos (S3, disco, etc.) es una fase posterior.
+model Evidencia {
+  id            String      @id @default(cuid())
+  requisicionId String
+  requisicion   Requisicion @relation(fields: [requisicionId], references: [id], onDelete: Cascade)
+  nombre        String
+  tamano        String
+  creada        DateTime    @default(now())
+
+  @@index([requisicionId])
+  @@map("evidencias")
+}
+
+/// Bitácora de cada cambio de estado o edición.
+model Evento {
+  id            String      @id @default(cuid())
+  requisicionId String
+  requisicion   Requisicion @relation(fields: [requisicionId], references: [id], onDelete: Cascade)
+  usuarioId     String?
+  usuario       Usuario?    @relation(fields: [usuarioId], references: [id], onDelete: SetNull)
+  autor         String
+  tipo          TipoEvento
+  comentario    String?
+  fecha         DateTime    @default(now())
+
+  @@index([requisicionId])
+  @@map("eventos")
+}
+
+/// Listas administrables: departamentos, técnicas estadísticas y responsables sugeridos.
+model Catalogo {
+  id     String       @id @default(cuid())
+  tipo   TipoCatalogo
+  nombre String
+
+  @@unique([tipo, nombre])
+  @@map("catalogos")
+}
+
+/// Código de 6 dígitos enviado por correo para comprobar que quien se registra es dueño del correo. Solo se guarda su HMAC.
+model VerificacionCorreo {
+  id         String    @id @default(cuid())
+  correo     String
+  codigoHash String
+  /// 'registro' (cuenta nueva) o 'recuperacion' (olvidó su contraseña): un código de uno no sirve para el otro.
+  proposito  String    @default("registro")
+  expira     DateTime
+  intentos   Int       @default(0)
+  usadaEn    DateTime?
+  creada     DateTime  @default(now())
+
+  @@index([correo, proposito])
+  @@map("verificaciones_correo")
+}
