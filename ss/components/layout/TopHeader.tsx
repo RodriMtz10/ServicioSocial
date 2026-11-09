@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { cerrarSesion } from '@/lib/cerrarSesion';
 import Link from 'next/link';
 import { useUsuario } from '@/lib/useUsuario';
+import BotonTema from '@/components/ui/BotonTema';
 
 export default function TopHeader({ onMenu }: { onMenu?: () => void }) {
   const [isOpen, setIsOpen] = useState(false);
@@ -44,6 +45,8 @@ export default function TopHeader({ onMenu }: { onMenu?: () => void }) {
       </div>
 
       {/* Menú de Usuario desplegable (Arriba a la Derecha) */}
+      <div className="flex items-center gap-2">
+      <BotonTema />
       <div className="relative" ref={dropdownRef}>
         <button
           onClick={() => setIsOpen(!isOpen)}
@@ -97,6 +100,7 @@ export default function TopHeader({ onMenu }: { onMenu?: () => void }) {
             </div>
           </div>
         )}
+      </div>
       </div>
     </header>
   );

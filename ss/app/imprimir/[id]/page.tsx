@@ -15,6 +15,12 @@ const td = 'border border-black px-2 py-1.5 align-top';
 /** Réplica imprimible del formato IT-CA-004-01. Botón "Imprimir" → Guardar como PDF. */
 export default function ImprimirPage() {
   const { id } = useParams<{ id: string }>();
+  // El formato impreso siempre es claro; se restaura el tema al salir.
+  React.useEffect(() => {
+    const h = document.documentElement, estaba = h.classList.contains('dark');
+    h.classList.remove('dark');
+    return () => { if (estaba) h.classList.add('dark'); };
+  }, []);
   const { usuario, esAdmin, cargando } = useUsuario();
   const { ready, requisiciones } = useRequisiciones();
   if (cargando || !ready) return <PaginaCargando />;

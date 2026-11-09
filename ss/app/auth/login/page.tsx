@@ -5,6 +5,7 @@ import { signIn } from 'next-auth/react';
 import { useSearchParams } from 'next/navigation';
 import { LogoTecnm } from '@/components/ui/Logo';
 import { EtiquetaCarga } from '@/components/ui/Cargando';
+import BotonTema from '@/components/ui/BotonTema';
 import { PasswordInput, RequisitosPassword } from '@/components/ui/PasswordInput';
 import { SelectDepartamento, SelectPuesto } from '@/components/ui/ListasInstitucionales';
 import { api, ApiError } from '@/lib/api';
@@ -101,7 +102,8 @@ function Acceso() {
   const Err = ({ k }: { k: string }) => (errores[k] ? <p className="text-[11px] font-semibold text-red-600 mt-1">{errores[k]}</p> : null);
 
   return (
-    <div className="min-h-screen bg-[#F3F6FA] flex flex-col justify-center py-8 px-4 sm:py-12 sm:px-6 lg:px-8 font-sans">
+    <div className="relative min-h-screen bg-[#F3F6FA] flex flex-col justify-center py-8 px-4 sm:py-12 sm:px-6 lg:px-8 font-sans">
+      <BotonTema className="absolute top-3 right-3 sm:top-4 sm:right-4" />
       <div className="anim-fade-up sm:mx-auto sm:w-full sm:max-w-md">
         <div className="bg-white p-6 rounded-t-2xl shadow-lg border border-b-0 border-gray-100 flex flex-col items-center gap-3">
           <LogoTecnm className="h-16" />
