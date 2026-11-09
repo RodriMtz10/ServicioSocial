@@ -1,36 +1,60 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# SGI · Requisición de Acciones Correctivas (ITMORELIA-IT-CA-004-01)
 
-## Getting Started
+Next.js 16 + React 19 + PostgreSQL (Prisma 7) + next-auth. Instituto Tecnológico de Morelia / TecNM.
 
-First, run the development server:
+## Puesta en marcha
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+# 1. Variables de entorno
+cp .env.example .env            # y escribe NEXTAUTH_SECRET:  openssl rand -base64 32
+
+# 2. PostgreSQL (opción rápida con Docker; si ya tienes uno, solo ajusta DATABASE_URL en .env)
+docker compose up -d
+
+# 3. Dependencias (también ejecuta "prisma generate")
+npm install
+
+# 4. Crear las tablas
+npx prisma migrate dev --name init
+
+# 5. Primer administrador (no hay usuarios de prueba)
+npm run db:crear-admin -- --nombre "Nombre Apellido" --correo admin@morelia.tecnm.mx --password "una-contraseña-larga"
+
+# 6. (Opcional) técnicas estadísticas habituales del formato
+npm run db:catalogos-base
+
+# 7. Arrancar
+npm run dev                     # http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Después entra con ese administrador → **Usuarios y catálogos** para dar de alta a los docentes, departamentos y responsables.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+En producción: `npx prisma migrate deploy` (`npm run db:desplegar`) en lugar de `migrate dev`, y un `NEXTAUTH_SECRET` propio.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Seguridad
 
-## Learn More
+- **Registro con verificación de correo**: la persona escribe su correo institucional (solo dominios de `REGISTRO_DOMINIOS`) y recibe un código de 6 dígitos que vence en 15 minutos, admite 5 intentos y sirve una vez. Solo se guarda su HMAC. Siempre crea un docente; los administradores los crea otro administrador. El envío usa SMTP (`SMTP_*` en `.env`); sin SMTP, en desarrollo el código se imprime en la terminal de `npm run dev`.
+- **Listas cerradas**: departamentos y puestos salen de `lib/institucional.ts` (se validan también en el servidor); responsables y personas del formulario son listas desplegables.
+- Contraseñas: mínimo 8, letras y números, sin contraseñas comunes ni el correo dentro; bcrypt (costo 12). Al cambiarla (tú o el administrador) se cierran las sesiones anteriores.
+- Límites de intentos: bloqueo de cuenta (5 fallos / 15 min), límite por IP en login y registro, y límite de códigos por correo.
+- La API siempre consulta la base de datos para saber rol y estado del usuario; el `proxy.ts` solo redirige. Protección CSRF por origen en toda la API, cuerpo máximo de 256 KB y respuestas `no-store`.
+- Cabeceras HTTP: CSP, X-Frame-Options, nosniff, Referrer-Policy, Permissions-Policy y HSTS (en `next.config.ts`).
+- Los limitadores viven en memoria: bastan para un solo servidor; con varias instancias hay que moverlos a Redis/BD.
 
-To learn more about Next.js, take a look at the following resources:
+## Qué hay
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+| Rol | Puede |
+|---|---|
+| Docente | Crear / editar borradores, enviar, corregir devueltas, marcar avance del plan, solicitar verificación, ver solo lo suyo |
+| Administrador (SGI) | Aprobar, devolver, verificar y cerrar, **editar cualquier requisición en cualquier estado** (queda en el historial con su nombre y motivo), reportes, usuarios y catálogos |
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- La autorización real está en `app/api/**` (`lib/server/actor.ts` consulta la base de datos en cada petición; `proxy.ts` solo redirige).
+- Folios `AC-ITM-AAAA-NNN` consecutivos por año, asignados en el servidor dentro de una transacción.
+- Las fechas se calculan con la hora de México, no la del servidor.
+- Logos: `public/logo-tecnm.png`, `public/logo-tecnm-blanco.png`, `public/logo-itm.png`, `app/icon.png`.
 
-## Deploy on Vercel
+## Limitaciones conocidas
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- Evidencias: solo se guarda nombre y tamaño del archivo; la subida real (disco/S3) es una fase posterior.
+- Los listados cargan todas las requisiciones visibles (sin paginación todavía).
+- Sin recuperación de contraseña por correo: el administrador restablece contraseñas desde **Usuarios y catálogos**.

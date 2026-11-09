@@ -1,21 +1,24 @@
 // components/layout/Sidebar.tsx
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { cerrarSesion } from '@/lib/cerrarSesion';
+import { useUsuario } from '@/lib/useUsuario';
+import { useRequisiciones } from '@/lib/store';
+import { LogoTecnm } from '@/components/ui/Logo';
 
-export default function Sidebar() {
+export default function Sidebar({ abierto = false, onCerrar = () => {} }: { abierto?: boolean; onCerrar?: () => void }) {
   const pathname = usePathname();
-  const [role, setRole] = useState<'docente' | 'admin'>('docente');
-  const [userName, setUserName] = useState('Dra. Mónica Pérez Lara');
-
-  useEffect(() => {
-    const storedRole = localStorage.getItem('user_role') as 'docente' | 'admin';
-    const storedName = localStorage.getItem('user_name');
-    if (storedRole) setRole(storedRole);
-    if (storedName) setUserName(storedName);
-  }, []);
+  // En celular el menú se cierra al navegar.
+  useEffect(() => { onCerrar(); // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathname]);
+  const { usuario } = useUsuario();
+  const { requisiciones } = useRequisiciones();
+  const role = usuario?.rol ?? 'docente';
+  const userName = usuario?.nombre ?? '';
+  const pendientes = requisiciones.filter((r) => r.estado === 'pendiente' || r.estado === 'verificacion').length;
 
   const navItems = [
     {
@@ -41,7 +44,7 @@ export default function Sidebar() {
     {
       label: 'Solicitudes pendientes',
       href: '/dashboard/solicitudes-pendientes',
-      badge: 3,
+      badge: true,
       icon: (
         <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -50,7 +53,7 @@ export default function Sidebar() {
       roles: ['admin']
     },
     {
-      label: 'Reportes del SGC',
+      label: 'Reportes del SGI',
       href: '/dashboard/reportes',
       icon: (
         <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -60,45 +63,59 @@ export default function Sidebar() {
       roles: ['admin']
     },
     {
-      label: 'Usuarios y catálogos',
-      href: '/dashboard/catalogos',
+      label: 'Usuarios',
+      href: '/dashboard/usuarios',
       icon: (
         <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
         </svg>
       ),
       roles: ['admin']
+    },
+    {
+      label: 'Catálogos',
+      href: '/dashboard/catalogos',
+      icon: (
+        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 10h16M4 14h16M4 18h16" />
+        </svg>
+      ),
+      roles: ['admin']
+    },
+    {
+      label: 'Mi perfil',
+      href: '/dashboard/cuenta',
+      icon: (
+        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+        </svg>
+      ),
+      roles: ['admin', 'docente']
     }
   ];
 
   const filteredNavItems = navItems.filter(item => item.roles.includes(role));
 
   return (
-    <aside className="w-64 bg-[#0F3470] text-white flex flex-col justify-between min-h-screen shrink-0 font-sans shadow-xl">
+    <>
+    {abierto && <div className="fixed inset-0 z-40 bg-slate-900/50 lg:hidden" onClick={onCerrar} aria-hidden="true" />}
+    <aside aria-label="Menú principal" className={`fixed inset-y-0 left-0 z-50 w-64 max-w-[85vw] overflow-y-auto transform transition-transform duration-200 lg:sticky lg:top-0 lg:self-start lg:h-screen lg:translate-x-0 lg:z-auto bg-[#0F3470] text-white flex flex-col justify-between shrink-0 font-sans shadow-xl ${abierto ? 'translate-x-0' : '-translate-x-full'}`}>
       <div>
         {/* Encabezado de la marca institucional */}
-        <div className="p-6 border-b border-blue-900/50">
-          <div className="flex items-center space-x-3">
-            <div className="w-9 h-9 bg-amber-400/20 border border-amber-400/40 rounded-lg flex items-center justify-center">
-              <svg className="w-5 h-5 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-              </svg>
-            </div>
-            <div>
-              <h2 className="text-sm font-bold tracking-tight">Tecnológico Nacional</h2>
-              <p className="text-[11px] text-blue-200">de México • Panel SGC</p>
-            </div>
-          </div>
+        <div className="px-5 py-5 border-b border-blue-900/50">
+          <LogoTecnm blanco className="h-11" />
+          <p className="text-[10px] font-semibold text-blue-200 uppercase tracking-wider mt-3">Instituto Tecnológico de Morelia</p>
+          <p className="text-[11px] text-blue-300">Panel SGI</p>
         </div>
 
         {/* Menú de navegación */}
         <nav className="p-4 space-y-1">
           <p className="px-3 text-[10px] font-semibold text-blue-300 uppercase tracking-wider mb-2">
-            Gestión de Calidad
+            Menú SGI
           </p>
 
           {filteredNavItems.map((item) => {
-            const isActive = pathname === item.href;
+            const isActive = pathname === item.href || pathname.startsWith(item.href + '/');
             return (
               <Link
                 key={item.href}
@@ -113,9 +130,9 @@ export default function Sidebar() {
                   <span>{item.icon}</span>
                   <span>{item.label}</span>
                 </div>
-                {item.badge && (
+                {item.badge && pendientes > 0 && (
                   <span className="bg-red-500 text-white text-[10px] px-2 py-0.5 rounded-full font-bold">
-                    {item.badge}
+                    {pendientes}
                   </span>
                 )}
               </Link>
@@ -140,10 +157,7 @@ export default function Sidebar() {
           </div>
 
           <button
-            onClick={() => {
-              localStorage.clear();
-              window.location.href = '/auth/login';
-            }}
+            onClick={() => cerrarSesion()}
             title="Cerrar sesión"
             className="p-1.5 text-blue-200 hover:text-red-400 hover:bg-white/10 rounded-lg transition-colors cursor-pointer"
           >
@@ -154,5 +168,6 @@ export default function Sidebar() {
         </div>
       </div>
     </aside>
+    </>
   );
 }

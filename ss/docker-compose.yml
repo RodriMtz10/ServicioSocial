@@ -1,0 +1,17 @@
+# Opcional: PostgreSQL local para desarrollo.  Uso:  docker compose up -d
+# Coincide con el DATABASE_URL de .env.example.
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: sgc
+      POSTGRES_PASSWORD: sgc_dev_password
+      POSTGRES_DB: sgc
+    ports:
+      - "5432:5432"
+    volumes:
+      - sgc_pgdata:/var/lib/postgresql/data
+
+volumes:
+  sgc_pgdata:

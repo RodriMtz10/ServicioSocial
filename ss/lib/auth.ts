@@ -1,57 +1,85 @@
-import { NextAuthOptions } from "next-auth";
-import CredentialsProvider from "next-auth/providers/credentials";
+import type { NextAuthOptions } from 'next-auth';
+import CredentialsProvider from 'next-auth/providers/credentials';
+import { prisma } from '@/lib/prisma';
+import { ipDe, permitir } from '@/lib/server/limite';
+import { MAX_INTENTOS, MINUTOS_BLOQUEO, gastarTiempo, verificarPassword } from '@/lib/security';
 
+/**
+ * Autenticación con correo y contraseña contra la tabla `usuarios` (contraseñas con bcrypt).
+ * - Tras MAX_INTENTOS fallos la cuenta se bloquea MINUTOS_BLOQUEO minutos.
+ * - El rol vive en el token solo para ocultar/mostrar pantallas; la API vuelve a consultarlo en la base de datos.
+ */
 export const authOptions: NextAuthOptions = {
-  session: { strategy: "jwt" },
-  pages: {
-    signIn: "/login",
-  },
+  session: { strategy: 'jwt', maxAge: 60 * 60 * 8 }, // 8 horas
+  pages: { signIn: '/auth/login' },
   providers: [
     CredentialsProvider({
-      name: "Credenciales Institucionales",
+      name: 'Credenciales Institucionales',
       credentials: {
-        email: { label: "Correo Institucional", type: "email" },
-        password: { label: "Contraseña", type: "password" }
+        email: { label: 'Correo institucional', type: 'email' },
+        password: { label: 'Contraseña', type: 'password' },
       },
-      async authorize(credentials) {
-        if (!credentials?.email || !credentials?.password) return null;
+      async authorize(credentials, req) {
+        const correo = credentials?.email?.trim().toLowerCase();
+        const password = credentials?.password;
+        if (!correo || !password || correo.length > 200 || password.length > 200) return null;
 
-        // Simulación de autenticación (Reemplazar con consulta a Base de Datos / Prisma)
-        if (credentials.email.includes("admin")) {
-          return {
-            id: "admin-01",
-            name: "Lic. Sandra Villaseñor Aguilar",
-            email: credentials.email,
-            role: "admin",
-            department: "Coordinación del SGC"
-          } as any;
-        } else {
-          return {
-            id: "docente-01",
-            name: "Dra. Mónica Pérez Lara",
-            email: credentials.email,
-            role: "docente",
-            department: "Sistemas y Computación"
-          } as any;
+        // Freno por IP (además del bloqueo por cuenta): 30 intentos de login cada 15 minutos.
+        if (!permitir(`login:${ipDe(req?.headers as Record<string, string | string[] | undefined>)}`, 30, 15 * 60_000)) return null;
+
+        const u = await prisma.usuario.findUnique({ where: { correo } });
+        if (!u || !u.activo) {
+          await gastarTiempo(password);
+          return null;
         }
-      }
-    })
+        if (u.bloqueadoHasta && u.bloqueadoHasta > new Date()) return null;
+
+        if (!(await verificarPassword(password, u.passwordHash))) {
+          const intentos = u.intentosFallidos + 1;
+          const bloquear = intentos >= MAX_INTENTOS;
+          await prisma.usuario.update({
+            where: { id: u.id },
+            data: { intentosFallidos: bloquear ? 0 : intentos, bloqueadoHasta: bloquear ? new Date(Date.now() + MINUTOS_BLOQUEO * 60_000) : null },
+          });
+          return null;
+        }
+
+        if (u.intentosFallidos > 0 || u.bloqueadoHasta) {
+          await prisma.usuario.update({ where: { id: u.id }, data: { intentosFallidos: 0, bloqueadoHasta: null } });
+        }
+        return { id: u.id, name: u.nombre, email: u.correo, role: u.rol, department: u.departamento, puesto: u.puesto, emitido: u.credencialesActualizadas.getTime() };
+      },
+    }),
   ],
   callbacks: {
-    async jwt({ token, user }) {
+    async jwt({ token, user, trigger }) {
+      // Tras editar el perfil, el cliente llama a update(): se relee la base para refrescar nombre/departamento/puesto.
+      if (trigger === 'update' && token.sub) {
+        const u = await prisma.usuario.findUnique({ where: { id: token.sub } });
+        if (u) {
+          token.name = u.nombre;
+          token.department = u.departamento;
+          token.puesto = u.puesto;
+          token.role = u.rol;
+        }
+      }
       if (user) {
-        token.role = (user as any).role;
-        token.department = (user as any).department;
+        token.role = user.role;
+        token.department = user.department;
+        token.puesto = user.puesto;
+        token.emitido = user.emitido;
       }
       return token;
     },
     async session({ session, token }) {
       if (session.user) {
-        (session.user as any).role = token.role;
-        (session.user as any).department = token.department;
-        (session.user as any).id = token.sub;
+        session.user.id = token.sub ?? '';
+        session.user.role = token.role ?? 'docente';
+        session.user.department = token.department ?? '';
+        session.user.puesto = token.puesto ?? '';
+        session.user.emitido = token.emitido ?? 0;
       }
       return session;
-    }
-  }
+    },
+  },
 };

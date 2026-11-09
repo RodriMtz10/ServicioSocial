@@ -1,4 +1,4 @@
-"use client";
+'use client';
 
 import React from 'react';
 import Link from 'next/link';
@@ -13,11 +13,11 @@ export default function UnauthorizedPage() {
         </div>
         <h2 className="text-xl font-bold text-slate-900">Acceso Restringido</h2>
         <p className="text-xs text-slate-500 leading-relaxed">
-          No tienes permisos suficientes para acceder a esta sección. Esta área está reservada exclusivamente para la administración del SGC o Representante de la Dirección (RD).
+          No tienes permisos suficientes para acceder a esta sección. Esta área está reservada exclusivamente para la administración del SGI o Representante de la Dirección (RD).
         </p>
         <div className="pt-4">
           <Link
-            href="/tablero"
+            href="/dashboard/tablero"
             className="inline-flex items-center justify-center gap-2 w-full py-2.5 bg-[#0F3470] hover:bg-[#0A2552] text-white text-xs font-bold rounded-xl shadow transition-all"
           >
             <ArrowLeft size={16} /> Volver al Tablero Principal

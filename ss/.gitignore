@@ -30,8 +30,12 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
+# env files: NUNCA se suben (el ejemplo sí)
 .env*
+!.env.example
+
+# cliente de Prisma generado (se crea con `prisma generate`, corre solo en postinstall)
+/generated
 
 # vercel
 .vercel

@@ -1,34 +1,14 @@
-import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth/next";
-import { authOptions } from "@/lib/auth";
+import { requerirActor } from '@/lib/server/actor';
+import { json, leerJson, manejar } from '@/lib/server/http';
+import { guardar, listar } from '@/lib/server/requisiciones';
+import { guardarSchema } from '@/lib/validacion';
 
-export async function GET(req: Request) {
-  const session = await getServerSession(authOptions);
+export const dynamic = 'force-dynamic';
 
-  if (!session) {
-    return NextResponse.json({ error: "No autorizado" }, { status: 401 });
-  }
+export const GET = () => manejar(async () => json(await listar(await requerirActor())));
 
-  const user = session.user as any;
-  
-  return NextResponse.json({
-    success: true,
-    userRole: user.role,
-    message: "Registros obtenidos correctamente."
-  });
-}
-
-export async function DELETE(req: Request) {
-  const session = await getServerSession(authOptions);
-  const user = session?.user as any;
-
-  // Regla de Seguridad: Impedir que un docente elimine registros
-  if (user?.role === "docente") {
-    return NextResponse.json(
-      { error: "Permiso denegado: Los docentes no pueden eliminar requisiciones." },
-      { status: 403 }
-    );
-  }
-
-  return NextResponse.json({ success: true });
-}
+export const POST = (req: Request) => manejar(async () => {
+  const a = await requerirActor();
+  const { datos, enviar } = guardarSchema.parse(await leerJson(req));
+  return json(await guardar(a, datos, enviar), 201);
+});
