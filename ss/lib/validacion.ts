@@ -69,6 +69,7 @@ export const transicionSchema = z.discriminatedUnion('accion', [
   z.object({ accion: z.literal('marcar'), accionId: z.string().min(1), completado: z.boolean() }),
   z.object({ accion: z.literal('solicitar_verificacion') }),
   z.object({ accion: z.literal('cerrar'), cierre: cierreSchema }),
+  z.object({ accion: z.literal('cambiar_estado'), estado: z.enum(['borrador', 'en_proceso', 'verificacion']), comentario: texto(1000).optional() }),
   z.object({ accion: z.literal('agregar_evidencia'), evidencia: evidenciaSchema }),
   z.object({ accion: z.literal('quitar_evidencia'), evidenciaId: z.string().min(1) }),
 ]);

@@ -143,6 +143,21 @@ function exigir(cond: boolean, msg: string, status = 403) {
   if (!cond) throw new ErrorHttp(status, msg);
 }
 
+/** Cambios de estado que el propio solicitante puede hacer (cerrar y aprobar son solo del administrador). */
+const TRANSICIONES_DOCENTE: Partial<Record<Estado, Estado[]>> = {
+  pendiente: ['borrador'],
+  en_proceso: ['verificacion'],
+  verificacion: ['en_proceso'],
+};
+const NOMBRE_ESTADO: Record<Estado, string> = {
+  borrador: 'borrador', pendiente: 'pendiente de aprobación', devuelta: 'devuelta', en_proceso: 'en proceso', verificacion: 'en verificación', cerrada: 'cerrada',
+};
+const EN_TRABAJO: Estado[] = ['borrador', 'devuelta', 'en_proceso', 'verificacion'];
+const pendientes = (acc: { completado: boolean }[]) => {
+  const n = acc.filter((x) => !x.completado).length;
+  return n ? `Con ${n} ${n === 1 ? 'acción pendiente' : 'acciones pendientes'}` : undefined;
+};
+
 export async function transicion(a: Actor, id: string, t: Transicion): Promise<Requisicion> {
   const base = await cargarVisible(a, id);
   const estado = base.estado as Estado;
@@ -178,10 +193,19 @@ export async function transicion(a: Actor, id: string, t: Transicion): Promise<R
       case 'solicitar_verificacion':
         exigir(esDueno, 'Solo el solicitante puede solicitar la verificación');
         exigir(estado === 'en_proceso', 'La requisición no está en proceso', 409);
-        exigir(base.acciones.length > 0 && base.acciones.every((x) => x.completado), 'Marca todas las acciones como completadas', 400);
         await cambiarEstado(tx, id, ['en_proceso'], { estado: 'verificacion' });
-        await evento(tx, id, a, 'verificacion');
+        await evento(tx, id, a, 'verificacion', pendientes(base.acciones));
         break;
+
+      case 'cambiar_estado': {
+        exigir(esDueno, 'Solo el solicitante cambia el estado de su requisición');
+        const desde = TRANSICIONES_DOCENTE[estado];
+        exigir(!!desde && desde.includes(t.estado), 'Ese cambio de estado no está permitido desde «' + estado.replace('_', ' ') + '»', 409);
+        await cambiarEstado(tx, id, [estado], { estado: t.estado });
+        if (t.estado === 'verificacion') await evento(tx, id, a, 'verificacion', [t.comentario, pendientes(base.acciones)].filter(Boolean).join(' · ') || undefined);
+        else await evento(tx, id, a, 'avance', `Estado: ${NOMBRE_ESTADO[estado]} → ${NOMBRE_ESTADO[t.estado]}${t.comentario ? `. ${t.comentario}` : ''}`);
+        break;
+      }
 
       case 'cerrar': {
         exigir(esAdmin, 'Solo el administrador puede verificar y cerrar');
@@ -200,15 +224,18 @@ export async function transicion(a: Actor, id: string, t: Transicion): Promise<R
 
       case 'agregar_evidencia':
         exigir(esDueno, 'Solo el solicitante adjunta evidencias');
-        exigir(['borrador', 'devuelta', 'en_proceso'].includes(estado), 'Ya no se pueden adjuntar archivos', 409);
+        exigir(EN_TRABAJO.includes(estado), 'Ya no se pueden adjuntar archivos', 409);
         await tx.evidencia.create({ data: { requisicionId: id, nombre: t.evidencia.nombre, tamano: t.evidencia.tamano } });
+        if (estado === 'en_proceso' || estado === 'verificacion') await evento(tx, id, a, 'avance', `Evidencia adjuntada: ${t.evidencia.nombre}`);
         break;
 
       case 'quitar_evidencia': {
         exigir(esDueno, 'Solo el solicitante quita evidencias');
-        exigir(['borrador', 'devuelta', 'en_proceso'].includes(estado), 'Ya no se pueden quitar archivos', 409);
+        exigir(EN_TRABAJO.includes(estado), 'Ya no se pueden quitar archivos', 409);
+        const ev = base.evidencias.find((x) => x.id === t.evidenciaId);
         const res = await tx.evidencia.deleteMany({ where: { id: t.evidenciaId, requisicionId: id } });
         if (res.count !== 1) throw new ErrorHttp(404, 'Evidencia no encontrada');
+        if (estado === 'en_proceso' || estado === 'verificacion') await evento(tx, id, a, 'avance', `Evidencia quitada: ${ev?.nombre ?? ''}`);
         break;
       }
     }

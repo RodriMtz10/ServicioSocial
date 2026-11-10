@@ -18,7 +18,7 @@ const PUNTO: Record<string, string> = {
 };
 const TEXTO: Record<string, string> = {
   creada: 'Requisición creada', enviada: 'Enviada al SGI', devuelta: 'Devuelta por el SGI', reabierta: 'Devuelta: causa raíz no eliminada',
-  aprobada: 'Plan aprobado', editada: 'Editada por el administrador', avance: 'Avance registrado', verificacion: 'Solicitud de verificación', cerrada: 'Requisición cerrada',
+  aprobada: 'Plan aprobado', editada: 'Editada por el administrador', avance: 'Avance o cambio registrado', verificacion: 'Solicitud de verificación', cerrada: 'Requisición cerrada',
 };
 const sn = (b: boolean | null | undefined) => (b === null || b === undefined ? '—' : b ? 'Sí' : 'No');
 
@@ -48,9 +48,11 @@ const btn = 'flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-xs font-bold 
 
 export default function DetalleRequisicion({ id }: { id: string }) {
   const { usuario, esAdmin, cargando } = useUsuario();
-  const { ready, requisiciones, aprobar, devolver, marcarAccion, solicitarVerificacion, cerrar, agregarEvidencia, quitarEvidencia, eliminar } = useRequisiciones();
+  const { ready, requisiciones, aprobar, devolver, marcarAccion, cambiarEstado, cerrar, agregarEvidencia, quitarEvidencia, eliminar } = useRequisiciones();
   const router = useRouter();
-  const [modal, setModal] = useState<null | 'devolver' | 'cerrar' | 'eliminar'>(null);
+  const [modal, setModal] = useState<null | 'devolver' | 'cerrar' | 'eliminar' | 'estado'>(null);
+  const [nuevoEstado, setNuevoEstado] = useState<'borrador' | 'en_proceso' | 'verificacion'>('verificacion');
+  const [notaEstado, setNotaEstado] = useState('');
   const [comentario, setComentario] = useState('');
   const [cierre, setCierre] = useState({ causaEliminada: '' as '' | 'si' | 'no', observaciones: '', fechaCierre: hoy(), firmaRD: '' });
   const [errCierre, setErrCierre] = useState('');
@@ -71,6 +73,16 @@ export default function DetalleRequisicion({ id }: { id: string }) {
   const todoHecho = r.planAccion.length > 0 && hechas === r.planAccion.length;
   const vencidas = accionesVencidas(r);
   const devolucion = r.estado === 'devuelta' ? [...r.historial].reverse().find((e) => e.tipo === 'devuelta' || e.tipo === 'reabierta') : undefined;
+
+  // Cambios de estado que puede hacer el solicitante (cerrar y aprobar son del administrador).
+  const OPCIONES_ESTADO: Record<string, { a: 'borrador' | 'en_proceso' | 'verificacion'; etiqueta: string; ayuda: string }[]> = {
+    pendiente: [{ a: 'borrador', etiqueta: 'Retirar para editar', ayuda: 'Regresa a borrador para que puedas corregirla antes de que el SGI la revise.' }],
+    en_proceso: [{ a: 'verificacion', etiqueta: 'Pasar a verificación', ayuda: 'Avisa al SGI que terminaste el plan para que verifique la eficacia.' }],
+    verificacion: [{ a: 'en_proceso', etiqueta: 'Regresar a en proceso', ayuda: 'Retira la solicitud de verificación para seguir trabajando en el plan.' }],
+  };
+  const opcionesEstado = esDueno ? OPCIONES_ESTADO[r.estado] ?? [] : [];
+  const abrirEstado = (a: 'borrador' | 'en_proceso' | 'verificacion') => { setNuevoEstado(a); setNotaEstado(''); setModal('estado'); };
+  const puedeAdjuntar = esDueno && (r.estado === 'en_proceso' || r.estado === 'verificacion');
 
   const abrirCierre = () => { setCierre({ causaEliminada: '', observaciones: '', fechaCierre: hoy(), firmaRD: usuario.nombre }); setErrCierre(''); setModal('cerrar'); };
   const confirmarCierre = async () => {
@@ -103,9 +115,6 @@ export default function DetalleRequisicion({ id }: { id: string }) {
             </>
           )}
           {esAdmin && r.estado === 'verificacion' && <button className={`${btn} bg-[#0F3470] text-white hover:bg-[#0A2552]`} onClick={abrirCierre}><ShieldCheck size={14} /> Verificar y cerrar</button>}
-          {esDueno && r.estado === 'en_proceso' && (
-            <button disabled={!todoHecho} title={todoHecho ? '' : 'Marca todas las acciones como completadas'} className={`${btn} bg-[#0F3470] text-white hover:bg-[#0A2552] disabled:opacity-50 disabled:cursor-not-allowed`} onClick={() => solicitarVerificacion(r.id)}><Send size={14} /> Solicitar verificación</button>
-          )}
         </div>
       </div>
 
@@ -117,6 +126,22 @@ export default function DetalleRequisicion({ id }: { id: string }) {
         </div>
         <div className="shrink-0"><EstadoBadge estado={r.estado} /></div>
       </div>
+
+      {opcionesEstado.length > 0 && (
+        <section aria-label="Cambiar estado" className="bg-white p-4 rounded-2xl border border-gray-100 shadow-xs flex flex-col sm:flex-row sm:items-center gap-3">
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-bold text-slate-900">Estado de tu requisición: <span className="text-[#0F3470]">{r.estado === 'en_proceso' ? 'en proceso' : r.estado === 'verificacion' ? 'en verificación' : r.estado}</span></p>
+            <p className="text-[11px] text-gray-500 mt-0.5">{opcionesEstado[0].ayuda}</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {opcionesEstado.map((o) => (
+              <button key={o.a} className={`${btn} ${o.a === 'verificacion' ? 'bg-[#0F3470] text-white hover:bg-[#0A2552]' : 'border border-gray-300 text-gray-600 hover:bg-gray-50'}`} onClick={() => abrirEstado(o.a)}>
+                {o.a === 'verificacion' ? <Send size={14} /> : <Undo2 size={14} />} {o.etiqueta}
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
 
       {devolucion && (
         <div className="flex gap-3 p-4 bg-red-50 border border-red-200 rounded-xl text-red-800"><Undo2 size={18} className="shrink-0 mt-0.5" />
@@ -171,7 +196,7 @@ export default function DetalleRequisicion({ id }: { id: string }) {
                 </table>
               </div>
             ) : <p className="text-xs text-gray-400">Aún no se capturan acciones.</p>}
-            {esDueno && r.estado === 'en_proceso' && <p className="text-[11px] text-gray-400 mt-3">Marca cada acción al completarla. Con todas completas podrás solicitar la verificación.</p>}
+            {esDueno && r.estado === 'en_proceso' && <p className="text-[11px] text-gray-400 mt-3">Marca cada acción al completarla. Cuando termines, usa «Pasar a verificación» arriba.</p>}
           </Bloque>
 
           <Bloque titulo="Archivos de evidencia">
@@ -179,14 +204,14 @@ export default function DetalleRequisicion({ id }: { id: string }) {
               {r.evidencias.map((ev) => (
                 <div key={ev.id} className="p-2.5 bg-gray-50 rounded-xl border border-gray-200 flex items-center justify-between">
                   <div className="min-w-0"><p className="text-xs font-bold text-gray-800 truncate">{ev.nombre}</p><p className="text-[10px] text-gray-400">{ev.tamano} · {ev.fecha}</p></div>
-                  {esDueno && ['borrador', 'devuelta', 'en_proceso'].includes(r.estado) && <button onClick={() => quitarEvidencia(r.id, ev.id)} className="text-xs font-bold text-red-500 p-1 cursor-pointer">Quitar</button>}
+                  {esDueno && ['borrador', 'devuelta', 'en_proceso', 'verificacion'].includes(r.estado) && <button onClick={() => quitarEvidencia(r.id, ev.id)} className="text-xs font-bold text-red-500 p-1 cursor-pointer">Quitar</button>}
                 </div>
               ))}
               {r.evidencias.length === 0 && <p className="text-xs text-gray-400">Sin archivos adjuntos.</p>}
             </div>
-            {esDueno && r.estado === 'en_proceso' && (
+            {puedeAdjuntar && (
               <label className="inline-flex items-center gap-1 mt-3 text-xs font-bold text-[#0F3470] bg-amber-400/20 hover:bg-amber-400/30 px-3 py-1.5 rounded-lg border border-amber-300 cursor-pointer">
-                <Paperclip size={13} /> Adjuntar archivo<input type="file" onChange={subir} className="hidden" />
+                <Paperclip size={13} /> Adjuntar evidencia<input type="file" onChange={subir} className="sr-only" aria-label="Adjuntar evidencia" />
               </label>
             )}
           </Bloque>
@@ -232,6 +257,23 @@ export default function DetalleRequisicion({ id }: { id: string }) {
           {esAdmin && !['borrador', 'devuelta', 'pendiente'].includes(r.estado) && (
             <p role="alert" className="text-xs font-semibold text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-3">Esta requisición está en estado «{r.estado.replace('_', ' ')}»: ya se trabajó en ella. Elimínala solo si es necesario.</p>
           )}
+        </Modal>
+      )}
+
+      {modal === 'estado' && (
+        <Modal titulo={opcionesEstado.find((o) => o.a === nuevoEstado)?.etiqueta ?? 'Cambiar estado'} onClose={() => setModal(null)} pie={
+          <>
+            <button className={`${btn} border border-gray-300 text-gray-600`} onClick={() => setModal(null)}>Cancelar</button>
+            <button className={`${btn} bg-[#0F3470] text-white`} onClick={async () => { if (await cambiarEstado(r.id, nuevoEstado, notaEstado.trim())) setModal(null); }}>Confirmar cambio</button>
+          </>
+        }>
+          <p className="text-sm text-slate-700">{opcionesEstado.find((o) => o.a === nuevoEstado)?.ayuda}</p>
+          {nuevoEstado === 'verificacion' && !todoHecho && (
+            <p role="alert" className="text-xs font-semibold text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-3">
+              Aún {r.planAccion.length - hechas === 1 ? 'tienes 1 acción' : `tienes ${r.planAccion.length - hechas} acciones`} sin marcar como completada{r.planAccion.length - hechas === 1 ? '' : 's'}. Puedes continuar, pero el SGI lo verá en el historial.
+            </p>
+          )}
+          <Campo label="Comentario (opcional)"><textarea rows={3} value={notaEstado} onChange={(e) => setNotaEstado(e.target.value)} placeholder="Ej. Se terminó la capacitación y se adjuntó la evidencia." className={inputCls()} /></Campo>
         </Modal>
       )}
 
