@@ -34,7 +34,7 @@ En producción: `npx prisma migrate deploy` (`npm run db:desplegar`) en lugar de
 
 ## Seguridad
 
-- **Registro con verificación de correo**: la persona escribe su correo institucional (solo dominios de `REGISTRO_DOMINIOS`) y recibe un código de 6 dígitos que vence en 15 minutos, admite 5 intentos y sirve una vez. Solo se guarda su HMAC. Siempre crea un docente; los administradores los crea otro administrador. El envío usa SMTP (`SMTP_*` en `.env`); sin SMTP, en desarrollo el código se imprime en la terminal de `npm run dev`.
+- **Registro con verificación de correo**: La persona escribe su correo institucional (solo dominios de `REGISTRO_DOMINIOS`) y recibe un código de 6 dígitos que vence en 15 minutos, admite 5 intentos y sirve una vez. Solo se guarda su HMAC. Siempre crea un docente; los administradores los crea otro administrador. El envío usa SMTP (`SMTP_*` en `.env`); sin SMTP, en desarrollo el código se imprime en la terminal de `npm run dev`.
 - **Listas cerradas**: departamentos y puestos salen de `lib/institucional.ts` (se validan también en el servidor); responsables y personas del formulario son listas desplegables.
 - Contraseñas: mínimo 8, letras y números, sin contraseñas comunes ni el correo dentro; bcrypt (costo 12). Al cambiarla (tú o el administrador) se cierran las sesiones anteriores.
 - Límites de intentos: bloqueo de cuenta (5 fallos / 15 min), límite por IP en login y registro, y límite de códigos por correo.
