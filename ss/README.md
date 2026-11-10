@@ -1,7 +1,8 @@
-# SGI · Requisición de Acciones Correctivas (ITMORELIA-IT-CA-004-01)
+# ss · aplicación
 
-Next.js 16 + React 19 + PostgreSQL (Prisma 7) + next-auth. Instituto Tecnológico de Morelia / TecNM.
+La documentación completa (instalación, variables de entorno, scripts, seguridad y despliegue) está en el [README principal](../README.md).
 
+<<<<<<< Updated upstream
 ## Puesta en marcha
 
 ```bash
@@ -58,3 +59,6 @@ En producción: `npx prisma migrate deploy` (`npm run db:desplegar`) en lugar de
 - Evidencias: solo se guarda nombre y tamaño del archivo; la subida real (disco/S3) es una fase posterior.
 - Los listados cargan todas las requisiciones visibles (sin paginación todavía).
 - Sin recuperación de contraseña por correo: el administrador restablece contraseñas desde **Usuarios y catálogos**.
+=======
+Inicio rápido: `cp .env.example .env` → `docker compose up -d` → `npm install` → `npx prisma migrate dev` → `npm run db:crear-admin` → `npm run dev`.
+>>>>>>> Stashed changes
