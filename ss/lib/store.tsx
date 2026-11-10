@@ -2,17 +2,17 @@
 
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { useSession } from 'next-auth/react';
-import { api, ApiError } from '@/lib/api';
-import type { Catalogos, EvidenciaArchivo, Requisicion, TipoCatalogo, Usuario } from '@/types';
+import { api, ApiError, subirArchivo } from '@/lib/api';
+import type { Catalogos, Requisicion, TipoCatalogo, Usuario } from '@/types';
 import type { AdminEditar, Datos } from '@/lib/validacion';
+import { useAvisos } from '@/lib/avisos';
 
 interface ItemCatalogo { id: string; nombre: string }
 interface CatalogosApi { departamentos: ItemCatalogo[]; tecnicas: ItemCatalogo[]; responsables: ItemCatalogo[] }
 const VACIO: CatalogosApi = { departamentos: [], tecnicas: [], responsables: [] };
 
-export interface Aviso { tipo: 'error' | 'ok'; texto: string }
 export type CierreInput = { causaEliminada: boolean; observaciones: string; fechaCierre: string; firmaRD: string };
-export type DatosEnvio = Omit<Datos, 'evidencias'> & { evidencias?: (Partial<EvidenciaArchivo> & { nombre: string; tamano: string })[] };
+export type DatosEnvio = Datos;
 
 interface Ctx {
   ready: boolean;
@@ -20,18 +20,18 @@ interface Ctx {
   catalogos: Catalogos;
   catalogoItems: CatalogosApi;
   personas: string[];
-  aviso: Aviso | null;
-  cerrarAviso: () => void;
   recargar: () => Promise<void>;
   /** Cada acción devuelve la requisición actualizada, o null si falló (el aviso ya se muestra solo). */
   guardar: (datos: DatosEnvio, id: string | undefined, enviar: boolean) => Promise<Requisicion | null>;
   aprobar: (id: string) => Promise<Requisicion | null>;
-  devolver: (id: string, comentario: string) => Promise<Requisicion | null>;
+  devolver: (id: string, comentario?: string) => Promise<Requisicion | null>;
   marcarAccion: (id: string, accionId: string, completado: boolean) => Promise<Requisicion | null>;
+  agregarAccion: (id: string, nueva: { accion: string; responsable: string; fechaProgramada: string; evidencia: string }) => Promise<Requisicion | null>;
   solicitarVerificacion: (id: string) => Promise<Requisicion | null>;
-  cambiarEstado: (id: string, estado: 'borrador' | 'en_proceso' | 'verificacion', comentario?: string) => Promise<Requisicion | null>;
+  cambiarEstado: (id: string, estado: 'en_proceso' | 'verificacion', comentario?: string) => Promise<Requisicion | null>;
   cerrar: (id: string, cierre: CierreInput) => Promise<Requisicion | null>;
-  agregarEvidencia: (id: string, e: { nombre: string; tamano: string }) => Promise<Requisicion | null>;
+  /** Sube el archivo real al servidor; `accionId` la vincula a una acción del plan. */
+  subirEvidencia: (id: string, archivo: File, accionId?: string) => Promise<Requisicion | null>;
   quitarEvidencia: (id: string, evidenciaId: string) => Promise<Requisicion | null>;
   adminEditar: (id: string, input: AdminEditar) => Promise<Requisicion | null>;
   eliminar: (id: string) => Promise<boolean>;
@@ -47,11 +47,11 @@ export function RequisicionesProvider({ children }: { children: React.ReactNode 
   const [requisiciones, setReqs] = useState<Requisicion[]>([]);
   const [cat, setCat] = useState<CatalogosApi>(VACIO);
   const [personas, setPersonas] = useState<string[]>([]);
-  const [aviso, setAviso] = useState<Aviso | null>(null);
+  const avisos = useAvisos();
 
   const fallo = useCallback((e: unknown) => {
-    setAviso({ tipo: 'error', texto: e instanceof ApiError ? e.message : 'Ocurrió un error inesperado' });
-  }, []);
+    avisos.error(e instanceof ApiError ? e.message : 'Ocurrió un error inesperado');
+  }, [avisos]);
 
   const recargar = useCallback(async () => {
     try {
@@ -97,23 +97,22 @@ export function RequisicionesProvider({ children }: { children: React.ReactNode 
     catalogos: { departamentos: cat.departamentos.map((x) => x.nombre), tecnicas: cat.tecnicas.map((x) => x.nombre), responsables: cat.responsables.map((x) => x.nombre) },
     catalogoItems: cat,
     personas,
-    aviso,
-    cerrarAviso: () => setAviso(null),
     recargar,
     guardar: (datos, id, enviar) => ejecutar(() => (id ? api<Requisicion>(`/api/requisiciones/${id}`, 'PUT', { datos, enviar }) : api<Requisicion>('/api/requisiciones', 'POST', { datos, enviar }))),
     aprobar: (id) => transicion(id, { accion: 'aprobar' }),
-    devolver: (id, comentario) => transicion(id, { accion: 'devolver', comentario }),
+    devolver: (id, comentario) => transicion(id, { accion: 'devolver', comentario: comentario || undefined }),
+    agregarAccion: async (id, nueva) => { const r = await transicion(id, { accion: 'agregar_accion', nueva }); if (r) avisos.ok('Acción agregada al plan.'); return r; },
     marcarAccion: (id, accionId, completado) => transicion(id, { accion: 'marcar', accionId, completado }),
     solicitarVerificacion: (id) => transicion(id, { accion: 'solicitar_verificacion' }),
-    cambiarEstado: async (id, estado, comentario) => { const r = await transicion(id, { accion: 'cambiar_estado', estado, comentario: comentario || undefined }); if (r) setAviso({ tipo: 'ok', texto: 'Estado actualizado.' }); return r; },
+    cambiarEstado: async (id, estado, comentario) => { const r = await transicion(id, { accion: 'cambiar_estado', estado, comentario: comentario || undefined }); if (r) avisos.ok('Estado actualizado.'); return r; },
     cerrar: (id, cierre) => transicion(id, { accion: 'cerrar', cierre }),
-    agregarEvidencia: async (id, evidencia) => { const r = await transicion(id, { accion: 'agregar_evidencia', evidencia }); if (r) setAviso({ tipo: 'ok', texto: `Evidencia «${evidencia.nombre}» adjuntada.` }); return r; },
+    subirEvidencia: async (id, archivo, accionId) => { const r = await ejecutar(() => subirArchivo<Requisicion>(`/api/requisiciones/${id}/evidencias`, { archivo, accionId }, archivo.name)); if (r) avisos.ok(`Evidencia «${archivo.name}» adjuntada.`); return r; },
     quitarEvidencia: (id, evidenciaId) => transicion(id, { accion: 'quitar_evidencia', evidenciaId }),
     eliminar: async (id) => {
       try {
         await api(`/api/requisiciones/${id}`, 'DELETE');
         setReqs((l) => l.filter((x) => x.id !== id));
-        setAviso({ tipo: 'ok', texto: 'Requisición eliminada.' });
+        avisos.ok('Requisición eliminada.');
         return true;
       } catch (e) {
         fallo(e);
@@ -137,22 +136,9 @@ export function RequisicionesProvider({ children }: { children: React.ReactNode 
         return true;
       } catch (e) { fallo(e); return false; }
     },
-  }), [ready, requisiciones, cat, personas, aviso, recargar, ejecutar, transicion, fallo]);
+  }), [ready, requisiciones, cat, personas, avisos, recargar, ejecutar, transicion, fallo]);
 
-  return <Contexto.Provider value={valor}>{children}{aviso && <Toast aviso={aviso} onClose={() => setAviso(null)} />}</Contexto.Provider>;
-}
-
-function Toast({ aviso, onClose }: { aviso: Aviso; onClose: () => void }) {
-  useEffect(() => {
-    const t = setTimeout(onClose, 6000);
-    return () => clearTimeout(t);
-  }, [aviso, onClose]);
-  return (
-    <div role="alert" className={`anim-toast fixed bottom-5 right-5 z-[100] max-w-sm px-4 py-3 rounded-xl shadow-xl text-xs font-semibold flex items-start gap-3 ${aviso.tipo === 'error' ? 'bg-red-600 text-white' : 'bg-emerald-600 text-white'}`}>
-      <span className="flex-1">{aviso.texto}</span>
-      <button onClick={onClose} aria-label="Cerrar aviso" className="opacity-80 hover:opacity-100 cursor-pointer">✕</button>
-    </div>
-  );
+  return <Contexto.Provider value={valor}>{children}</Contexto.Provider>;
 }
 
 export function useRequisiciones() {

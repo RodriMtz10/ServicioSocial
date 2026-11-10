@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import { PaginaCargando } from '@/components/ui/Cargando';
 import Link from 'next/link';
 import { Plus } from 'lucide-react';
+import PanelVencidas from '@/components/requisiciones/PanelVencidas';
 import RequisicionTable from '@/components/requisiciones/RequisicionTable';
 import { EstadoBadge } from '@/components/ui/Badge';
 import { useRequisiciones } from '@/lib/store';
@@ -31,6 +32,8 @@ export default function MisSolicitudesPage() {
           <Plus size={15} /> Nueva requisición
         </Link>
       </div>
+
+      <PanelVencidas requisiciones={mias} esAdmin={false} />
 
       {atencion.length > 0 && (
         <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-xs">

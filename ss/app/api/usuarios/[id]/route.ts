@@ -1,8 +1,9 @@
 import { requerirAdmin } from '@/lib/server/actor';
 import { ErrorHttp, esDuplicado, esRestriccion, json, leerJson, manejar } from '@/lib/server/http';
+import { borrarArchivo } from '@/lib/server/archivos';
 import { aUsuario } from '@/lib/server/usuarios';
 import { prisma } from '@/lib/prisma';
-import { hashPassword } from '@/lib/security';
+import { auditar } from '@/lib/server/auditoria';
 import { editarUsuarioSchema } from '@/lib/validacion';
 
 export const dynamic = 'force-dynamic';
@@ -16,15 +17,21 @@ export const PATCH = (req: Request, { params }: { params: Promise<{ id: string }
   if (id === admin.id && (d.activo === false || (d.rol && d.rol !== 'admin'))) {
     throw new ErrorHttp(400, 'No puedes desactivarte ni quitarte el rol de administrador a ti mismo');
   }
-  const { password, ...resto } = d;
+  const resto = d; // el administrador no cambia contraseñas ajenas: cada persona usa «Mi perfil» o «Olvidé mi contraseña»
   const existe = await prisma.usuario.findUnique({ where: { id } });
   if (!existe) throw new ErrorHttp(404, 'Usuario no encontrado');
 
   try {
     const u = await prisma.usuario.update({
       where: { id },
-      data: { ...resto, ...(password ? { passwordHash: await hashPassword(password), credencialesActualizadas: new Date(), intentosFallidos: 0, bloqueadoHasta: null } : {}), ...(d.activo === true ? { intentosFallidos: 0, bloqueadoHasta: null } : {}) },
+      data: { ...resto, ...(d.activo === true ? { intentosFallidos: 0, bloqueadoHasta: null } : {}) },
     });
+    const cambios = [
+      resto.nombre !== undefined && resto.nombre !== existe.nombre && 'nombre', resto.correo !== undefined && resto.correo !== existe.correo && `correo → ${resto.correo}`,
+      resto.rol !== undefined && resto.rol !== existe.rol && `rol ${existe.rol} → ${resto.rol}`, resto.departamento !== undefined && resto.departamento !== existe.departamento && 'departamento',
+      resto.puesto !== undefined && resto.puesto !== existe.puesto && 'puesto', resto.activo !== undefined && resto.activo !== existe.activo && (resto.activo ? 'reactivado' : 'desactivado'),
+    ].filter(Boolean).join('; ');
+    await auditar(admin, 'usuario.editar', 'usuario', id, `${existe.correo}: ${cambios || 'sin cambios'}`);
     return json(aUsuario(u));
   } catch (e) {
     if (esDuplicado(e)) throw new ErrorHttp(409, 'Ya existe otro usuario con ese correo', { correo: 'Correo ya registrado' });
@@ -47,9 +54,11 @@ export const DELETE = (_req: Request, { params }: { params: Promise<{ id: string
   if ((await prisma.requisicion.count({ where: { solicitanteId: id } })) > 0) throw new ErrorHttp(409, MENSAJE);
   try {
     await prisma.usuario.delete({ where: { id } });
+    await borrarArchivo(u.fotoClave);
   } catch (e) {
     if (esRestriccion(e)) throw new ErrorHttp(409, MENSAJE);
     throw e;
   }
+  await auditar(admin, 'usuario.eliminar', 'usuario', id, u.correo);
   return json({ ok: true });
 });

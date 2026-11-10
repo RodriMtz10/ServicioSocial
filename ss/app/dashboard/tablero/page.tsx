@@ -5,6 +5,7 @@ import { PaginaCargando } from '@/components/ui/Cargando';
 import Link from 'next/link';
 import { Plus } from 'lucide-react';
 import KpiCards from '@/components/requisiciones/KpiCards';
+import PanelVencidas from '@/components/requisiciones/PanelVencidas';
 import RequisicionTable from '@/components/requisiciones/RequisicionTable';
 import { useRequisiciones } from '@/lib/store';
 import { useUsuario } from '@/lib/useUsuario';
@@ -44,6 +45,8 @@ export default function TableroPage() {
         { label: 'En proceso', valor: n('en_proceso'), tono: 'violet', nota: vencidas ? `${vencidas} acciones vencidas` : undefined },
         { label: 'Cerradas', valor: n('cerrada'), tono: 'green' },
       ]} />
+
+      <PanelVencidas requisiciones={visibles} esAdmin={esAdmin} />
 
       <RequisicionTable datos={visibles} mostrarSolicitante={esAdmin} exportar={esAdmin} />
     </div>

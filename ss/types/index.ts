@@ -18,12 +18,17 @@ export interface PlanAccionItem {
   completado: boolean;
 }
 
-/** Solo metadatos: la subida real de archivos es una fase posterior (S3 / UploadThing). */
+/** Archivo de evidencia. `accionId` la vincula a una acción del plan (null = evidencia general). */
 export interface EvidenciaArchivo {
   id: string;
   nombre: string;
   tamano: string;
   fecha: string;
+  accionId: string | null;
+  /** false en evidencias antiguas que solo guardaron el nombre (sin archivo). */
+  disponible: boolean;
+  /** Se puede mostrar dentro del navegador (imagen o PDF). */
+  enLinea: boolean;
 }
 
 export type TipoEvento =
@@ -84,6 +89,8 @@ export interface Usuario {
   departamento: string;
   puesto: string;
   activo: boolean;
+  /** URL de la foto de perfil (null = sin foto: se muestran las iniciales). */
+  foto: string | null;
 }
 
 export type TipoCatalogo = 'departamento' | 'tecnica' | 'responsable';

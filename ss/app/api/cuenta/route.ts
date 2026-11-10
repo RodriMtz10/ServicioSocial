@@ -1,6 +1,7 @@
 import { prisma } from '@/lib/prisma';
 import { requerirActor } from '@/lib/server/actor';
 import { json, leerJson, manejar } from '@/lib/server/http';
+import { auditar } from '@/lib/server/auditoria';
 import { aUsuario } from '@/lib/server/usuarios';
 import { perfilSchema } from '@/lib/validacion';
 

@@ -30,7 +30,7 @@ export async function proxy(req: NextRequest) {
     url.searchParams.set('callbackUrl', pathname);
     return NextResponse.redirect(url);
   }
-  const soloAdmin = ['/dashboard/solicitudes-pendientes', '/dashboard/reportes', '/dashboard/catalogos', '/dashboard/usuarios'];
+  const soloAdmin = ['/dashboard/solicitudes-pendientes', '/dashboard/reportes', '/dashboard/catalogos', '/dashboard/usuarios', '/dashboard/auditoria'];
   if (token.role !== 'admin' && soloAdmin.some((p) => pathname.startsWith(p))) {
     return NextResponse.redirect(new URL('/unauthorized', req.url));
   }

@@ -3,6 +3,7 @@ import { ErrorHttp, esDuplicado, json, leerJson, manejar } from '@/lib/server/ht
 import { aUsuario, listarUsuarios, nombresActivos } from '@/lib/server/usuarios';
 import { prisma } from '@/lib/prisma';
 import { hashPassword } from '@/lib/security';
+import { auditar } from '@/lib/server/auditoria';
 import { crearUsuarioSchema } from '@/lib/validacion';
 
 export const dynamic = 'force-dynamic';
@@ -16,12 +17,13 @@ export const GET = (req: Request) => manejar(async () => {
 });
 
 export const POST = (req: Request) => manejar(async () => {
-  await requerirAdmin();
+  const admin = await requerirAdmin();
   const d = crearUsuarioSchema.parse(await leerJson(req));
   try {
     const u = await prisma.usuario.create({
       data: { nombre: d.nombre, correo: d.correo, passwordHash: await hashPassword(d.password), rol: d.rol, departamento: d.departamento, puesto: d.puesto },
     });
+    await auditar(admin, 'usuario.crear', 'usuario', u.id, `${u.correo} (${u.rol})`);
     return json(aUsuario(u), 201);
   } catch (e) {
     if (esDuplicado(e)) throw new ErrorHttp(409, 'Ya existe un usuario con ese correo', { correo: 'Correo ya registrado' });

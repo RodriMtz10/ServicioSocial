@@ -1,4 +1,4 @@
-import type { EvidenciaArchivo, PlanAccionItem, Requisicion } from '@/types';
+import type { PlanAccionItem, Requisicion } from '@/types';
 import { uid } from '@/lib/utils';
 
 export interface FormValues {
@@ -12,7 +12,6 @@ export interface FormValues {
   causaRaiz: string;
   accionRealizar: string;
   planAccion: PlanAccionItem[];
-  evidencias: EvidenciaArchivo[];
   observacionesDocente: string;
   definio: string;
   verifico: string;
@@ -21,7 +20,7 @@ export interface FormValues {
 export type DatosFormulario = Pick<
   Requisicion,
   | 'descripcion' | 'responsableDefinir' | 'responsableVerificar' | 'requiereAC' | 'requiereCorreccion'
-  | 'tecnicaEstadistica' | 'causaRaiz' | 'accionRealizar' | 'planAccion' | 'evidencias' | 'observacionesDocente' | 'definio' | 'verifico'
+  | 'tecnicaEstadistica' | 'causaRaiz' | 'accionRealizar' | 'planAccion' | 'observacionesDocente' | 'definio' | 'verifico'
 >;
 
 export const filaPlan = (): PlanAccionItem => ({ id: uid(), accion: '', responsable: '', fechaProgramada: '', evidencia: '', completado: false });
@@ -30,7 +29,7 @@ export const valoresVacios = (nombreUsuario: string): FormValues => ({
   descripcion: '', responsableDefinir: '', responsableVerificar: '',
   requiereAC: '', requiereCorreccion: '',
   tecnicaSel: '', tecnicaOtra: '', causaRaiz: '', accionRealizar: '',
-  planAccion: [filaPlan()], evidencias: [],
+  planAccion: [filaPlan()],
   observacionesDocente: '', definio: nombreUsuario, verifico: '',
 });
 
@@ -44,7 +43,6 @@ export function deRequisicion(r: Requisicion, tecnicas: string[]): FormValues {
     tecnicaSel: enCatalogo ? r.tecnicaEstadistica : 'Otra', tecnicaOtra: enCatalogo ? '' : r.tecnicaEstadistica,
     causaRaiz: r.causaRaiz, accionRealizar: r.accionRealizar,
     planAccion: r.planAccion.length ? r.planAccion : [filaPlan()],
-    evidencias: r.evidencias,
     observacionesDocente: r.observacionesDocente, definio: r.definio, verifico: r.verifico,
   };
 }
@@ -61,7 +59,6 @@ export function aDatos(v: FormValues): DatosFormulario {
     causaRaiz: v.causaRaiz.trim(),
     accionRealizar: v.accionRealizar.trim(),
     planAccion: v.planAccion.filter((p) => p.accion || p.responsable || p.fechaProgramada || p.evidencia),
-    evidencias: v.evidencias,
     observacionesDocente: v.observacionesDocente.trim(),
     definio: v.definio.trim(),
     verifico: v.verifico.trim(),

@@ -5,23 +5,72 @@ import { useSession } from 'next-auth/react';
 import { cerrarSesion } from '@/lib/cerrarSesion';
 import { Campo, inputCls } from '@/components/ui/Campo';
 import { Skeleton, Spinner } from '@/components/ui/Cargando';
+import { useAvisos } from '@/lib/avisos';
 import { PasswordInput, RequisitosPassword } from '@/components/ui/PasswordInput';
 import { SelectDepartamento, SelectPuesto } from '@/components/ui/ListasInstitucionales';
-import { api, ApiError } from '@/lib/api';
+import { api, ApiError, subirArchivo } from '@/lib/api';
+import Avatar from '@/components/ui/Avatar';
+import { prepararFoto } from '@/lib/imagen';
 import { useUsuario } from '@/lib/useUsuario';
 import type { Usuario } from '@/types';
 
 type Msg = { ok: boolean; t: string } | null;
 const mensajeDe = (err: unknown): { t: string; campos: Record<string, string> } =>
   err instanceof ApiError ? { t: err.message, campos: err.errores ?? {} } : { t: 'Error inesperado', campos: {} };
-const boton = 'px-5 py-3 sm:py-2.5 rounded-xl bg-[#0F3470] text-white text-xs font-bold hover:bg-[#0A2552] disabled:opacity-60 cursor-pointer';
+const boton = 'accion px-5 py-3 sm:py-2.5 rounded-xl bg-[#0F3470] text-white text-xs font-bold hover:bg-[#0A2552] disabled:opacity-60 cursor-pointer';
+
+/** Foto de perfil: se recorta y reduce en el navegador antes de subirla. */
+function FotoPerfil() {
+  const { usuario } = useUsuario();
+  const { update } = useSession();
+  const avisos = useAvisos();
+  const [ocupado, setOcupado] = useState(false);
+  if (!usuario) return null;
+
+  const subir = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    e.target.value = '';
+    if (!f) return;
+    setOcupado(true);
+    try {
+      const blob = await prepararFoto(f);
+      await subirArchivo<Usuario>('/api/cuenta/foto', { foto: blob }, 'foto.jpg');
+      await update();
+      avisos.ok('Foto de perfil actualizada.');
+    } catch (err) { avisos.error(err instanceof ApiError ? err.message : err instanceof Error ? err.message : 'No se pudo subir la foto'); } finally { setOcupado(false); }
+  };
+  const quitar = async () => {
+    setOcupado(true);
+    try { await api('/api/cuenta/foto', 'DELETE'); await update(); avisos.ok('Foto de perfil quitada.'); } catch (err) { avisos.error(err instanceof ApiError ? err.message : 'No se pudo quitar la foto'); } finally { setOcupado(false); }
+  };
+
+  return (
+    <section className="bg-white p-5 sm:p-6 rounded-2xl border border-gray-100 shadow-xs" aria-labelledby="t-foto">
+      <h2 id="t-foto" className="text-sm font-bold text-[#0F3470] uppercase border-b border-gray-100 pb-3 mb-4">Foto de perfil</h2>
+      <div className="flex flex-wrap items-center gap-5">
+        <Avatar nombre={usuario.nombre} foto={usuario.foto} clase="w-24 h-24 text-2xl" />
+        <div className="space-y-2">
+          <div className="flex flex-wrap gap-2">
+            <label className={`${boton} inline-flex items-center gap-2 ${ocupado ? 'opacity-60 pointer-events-none' : ''}`}>
+              {ocupado ? <><Spinner />Procesando…</> : usuario.foto ? 'Cambiar foto' : 'Subir foto'}
+              <input type="file" accept="image/jpeg,image/png,image/webp" onChange={subir} className="sr-only" aria-label="Elegir foto de perfil" />
+            </label>
+            {usuario.foto && <button type="button" onClick={quitar} disabled={ocupado} className="px-5 py-3 sm:py-2.5 rounded-xl border border-red-200 text-red-600 text-xs font-bold hover:bg-red-50 disabled:opacity-60 cursor-pointer">Quitar foto</button>}
+          </div>
+          <p className="text-[11px] text-gray-400">JPG, PNG o WEBP. Se recorta en cuadrado y se reduce automáticamente. Solo tú y los administradores la ven.</p>
+        </div>
+      </div>
+    </section>
+  );
+}
 
 /** Datos personales: cualquier usuario (docente o administrador) puede cambiarlos cuando quiera. */
 function Perfil() {
   const { update } = useSession();
   const [f, setF] = useState<{ nombre: string; departamento: string; puesto: string; correo: string; rol: string } | null>(null);
   const [errores, setErrores] = useState<Record<string, string>>({});
-  const [msg, setMsg] = useState<Msg>(null);
+  const avisos = useAvisos();
+  const setMsg = (m: Msg) => { if (m) (m.ok ? avisos.ok(m.t) : avisos.error(m.t)); };
   const [enviando, setEnviando] = useState(false);
 
   useEffect(() => {
@@ -52,8 +101,7 @@ function Perfil() {
             <Campo label="Rol"><input readOnly value={f.rol === 'admin' ? 'Administrador SGI' : 'Docente'} className={`${inputCls()} bg-gray-50 text-gray-500`} /></Campo>
           </div>
           <p className="text-[11px] text-gray-400">El correo y el rol solo los puede cambiar un administrador.</p>
-          {msg && <p role="status" className={`text-xs font-semibold ${msg.ok ? 'text-emerald-700' : 'text-red-600'}`}>{msg.t}</p>}
-          <button disabled={enviando} className={boton}>{enviando ? <span className="inline-flex items-center gap-2"><Spinner />Guardando…</span> : 'Guardar mis datos'}</button>
+              <button disabled={enviando} className={boton}>{enviando ? <span className="inline-flex items-center gap-2"><Spinner />Guardando…</span> : 'Guardar mis datos'}</button>
         </>
       )}
     </form>
@@ -63,7 +111,8 @@ function Perfil() {
 function CambiarPassword() {
   const [f, setF] = useState({ actual: '', nueva: '', repetir: '' });
   const [errores, setErrores] = useState<Record<string, string>>({});
-  const [msg, setMsg] = useState<Msg>(null);
+  const avisos = useAvisos();
+  const setMsg = (m: Msg) => { if (m) (m.ok ? avisos.ok(m.t) : avisos.error(m.t)); };
   const [enviando, setEnviando] = useState(false);
 
   const guardar = async (e: React.FormEvent) => {
@@ -86,7 +135,6 @@ function CambiarPassword() {
       <Campo label="Nueva contraseña" error={errores.nueva}><PasswordInput autoComplete="new-password" required maxLength={72} value={f.nueva} onChange={(e) => setF({ ...f, nueva: e.target.value })} claseInput={inputCls(errores.nueva)} /></Campo>
       <Campo label="Repite la nueva contraseña" error={errores.repetir}><PasswordInput autoComplete="new-password" required maxLength={72} value={f.repetir} onChange={(e) => setF({ ...f, repetir: e.target.value })} claseInput={inputCls(errores.repetir)} /></Campo>
       <RequisitosPassword password={f.nueva} repetir={f.repetir} />
-      {msg && <p role="status" className={`text-xs font-semibold ${msg.ok ? 'text-emerald-700' : 'text-red-600'}`}>{msg.t}</p>}
       <button disabled={enviando} className={boton}>{enviando ? <span className="inline-flex items-center gap-2"><Spinner />Guardando…</span> : 'Actualizar contraseña'}</button>
     </form>
   );
@@ -100,6 +148,7 @@ export default function CuentaPage() {
         <h1 className="text-xl font-bold text-slate-900 tracking-tight">Mi perfil</h1>
         <p className="text-xs text-gray-500 mt-0.5">{usuario?.nombre} · {usuario?.correo}</p>
       </div>
+      <FotoPerfil />
       <Perfil />
       <CambiarPassword />
     </div>
