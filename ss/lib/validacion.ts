@@ -6,6 +6,8 @@ const fecha = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Fecha inválida (AAAA-MM-
 const texto = (max = 4000) => z.string().trim().max(max, `Máximo ${max} caracteres`);
 
 export const accionSchema = z.object({
+  /** Id de la acción ya guardada: conserva sus evidencias al guardar el plan. */
+  id: z.string().max(60).optional(),
   accion: texto(1000),
   responsable: texto(200),
   fechaProgramada: fecha.or(z.literal('')),
@@ -13,7 +15,13 @@ export const accionSchema = z.object({
   completado: z.boolean().default(false),
 });
 
-export const evidenciaSchema = z.object({ id: z.string().optional(), nombre: texto(255).min(1), tamano: texto(30) });
+/** Acción nueva que el solicitante agrega mientras la requisición está en proceso. */
+export const accionNuevaSchema = z.object({
+  accion: texto(1000).min(5, 'Describe la acción (mínimo 5 caracteres)'),
+  responsable: texto(200).min(1, 'Indica el responsable'),
+  fechaProgramada: fecha,
+  evidencia: texto(500).min(1, 'Indica qué evidencia se presentará'),
+});
 
 /** Campos del formulario (borrador: pueden estar incompletos). */
 export const datosSchema = z.object({
@@ -26,7 +34,6 @@ export const datosSchema = z.object({
   causaRaiz: texto(),
   accionRealizar: texto(),
   planAccion: z.array(accionSchema).max(50),
-  evidencias: z.array(evidenciaSchema).max(50).optional(),
   observacionesDocente: texto(),
   definio: texto(300),
   verifico: texto(300),
@@ -65,12 +72,12 @@ export const cierreSchema = z.object({
 
 export const transicionSchema = z.discriminatedUnion('accion', [
   z.object({ accion: z.literal('aprobar') }),
-  z.object({ accion: z.literal('devolver'), comentario: texto(2000).min(5, 'Explica qué debe corregirse') }),
+  z.object({ accion: z.literal('devolver'), comentario: texto(2000).optional() }),
   z.object({ accion: z.literal('marcar'), accionId: z.string().min(1), completado: z.boolean() }),
   z.object({ accion: z.literal('solicitar_verificacion') }),
   z.object({ accion: z.literal('cerrar'), cierre: cierreSchema }),
-  z.object({ accion: z.literal('cambiar_estado'), estado: z.enum(['borrador', 'en_proceso', 'verificacion']), comentario: texto(1000).optional() }),
-  z.object({ accion: z.literal('agregar_evidencia'), evidencia: evidenciaSchema }),
+  z.object({ accion: z.literal('agregar_accion'), nueva: accionNuevaSchema }),
+  z.object({ accion: z.literal('cambiar_estado'), estado: z.enum(['en_proceso', 'verificacion']), comentario: texto(1000).optional() }),
   z.object({ accion: z.literal('quitar_evidencia'), evidenciaId: z.string().min(1) }),
 ]);
 export type Transicion = z.infer<typeof transicionSchema>;
@@ -111,15 +118,14 @@ export const crearUsuarioSchema = conPolitica(z.object({
   puesto,
 }));
 
-export const editarUsuarioSchema = conPolitica(z.object({
+export const editarUsuarioSchema = z.object({
   nombre: texto(200).min(3, 'Escribe el nombre completo').optional(),
   correo: correo.optional(),
   rol: z.enum(['docente', 'admin']).optional(),
   departamento: departamento.optional(),
   puesto: puesto.optional(),
   activo: z.boolean().optional(),
-  password: password.optional(),
-}));
+});
 
 export const catalogoSchema = z.object({
   tipo: z.enum(['departamento', 'tecnica', 'responsable']),

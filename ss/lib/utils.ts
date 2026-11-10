@@ -33,8 +33,5 @@ export function accionesVencidas(r: Requisicion) {
   return r.planAccion.filter((p) => !p.completado && p.fechaProgramada && p.fechaProgramada < h).length;
 }
 
-export const csv = (rows: (string | number)[][]) =>
-  rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
-
 export const iniciales = (nombre: string) =>
   nombre.replace(/^(Dr\.|Dra\.|Ing\.|Mtra\.|Mtro\.|Lic\.|M\.C\.)\s+/, '').split(' ').slice(0, 2).map((x) => x[0]).join('');

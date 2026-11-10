@@ -57,6 +57,9 @@ model Usuario {
   bloqueadoHasta   DateTime?
   /// Se actualiza al cambiar la contraseña: las sesiones emitidas antes de esta fecha dejan de valer.
   credencialesActualizadas DateTime @default(now())
+  /// Foto de perfil: nombre del archivo en el almacén (ver lib/server/archivos.ts) y cuándo se cambió (para refrescar la caché).
+  fotoClave        String?       @unique
+  fotoActualizada  DateTime?
   creado           DateTime      @default(now())
   actualizado      DateTime      @updatedAt
   requisiciones    Requisicion[]
@@ -115,6 +118,8 @@ model Requisicion {
 
   creada      DateTime @default(now())
   actualizada DateTime @updatedAt
+  /// Última vez que se envió un recordatorio de acciones por vencer o vencidas (evita avisar más de una vez al día).
+  recordatorioEn DateTime?
 
   acciones   AccionPlan[]
   evidencias Evidencia[]
@@ -137,22 +142,52 @@ model AccionPlan {
   fechaProgramada DateTime?   @db.Date
   evidencia       String
   completado      Boolean     @default(false)
+  evidencias      Evidencia[]
 
   @@index([requisicionId])
   @@map("acciones_plan")
 }
 
-/// Solo metadatos del archivo. El almacenamiento real de archivos (S3, disco, etc.) es una fase posterior.
+/// Archivo de evidencia. El contenido vive en disco (carpeta ALMACEN_DIR) con un nombre aleatorio (`clave`);
+/// aquí solo se guardan sus datos. Los registros anteriores a la subida real no tienen `clave` (solo nombre y tamaño).
 model Evidencia {
   id            String      @id @default(cuid())
   requisicionId String
   requisicion   Requisicion @relation(fields: [requisicionId], references: [id], onDelete: Cascade)
+  /// Acción del plan a la que pertenece (vacío = evidencia general de la requisición).
+  accionId      String?
+  accion        AccionPlan? @relation(fields: [accionId], references: [id], onDelete: SetNull)
   nombre        String
   tamano        String
+  clave         String?     @unique
+  mime          String?
+  bytes         Int?
+  sha256        String?
+  subidaPor     String?
   creada        DateTime    @default(now())
 
   @@index([requisicionId])
+  @@index([accionId])
   @@map("evidencias")
+}
+
+/// Bitácora general del sistema (quién hizo qué y cuándo). No tiene relaciones para que sobreviva al borrado de usuarios y requisiciones.
+model Auditoria {
+  id          String   @id @default(cuid())
+  fecha       DateTime @default(now())
+  actorId     String?
+  actorNombre String?
+  actorRol    String?
+  accion      String
+  entidad     String
+  entidadId   String?
+  detalle     String?
+  ip          String?
+
+  @@index([fecha])
+  @@index([accion])
+  @@index([entidad, entidadId])
+  @@map("auditoria")
 }
 
 /// Bitácora de cada cambio de estado o edición.

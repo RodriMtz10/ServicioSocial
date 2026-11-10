@@ -4,6 +4,7 @@ import { ErrorHttp, esDuplicado, json, leerJson, manejar } from '@/lib/server/ht
 import { ipDe, limitar } from '@/lib/server/limite';
 import { codigoCoincide, MAX_INTENTOS_CODIGO } from '@/lib/server/verificacion';
 import { hashPassword } from '@/lib/security';
+import { auditar } from '@/lib/server/auditoria';
 import { registroSchema } from '@/lib/validacion';
 
 export const dynamic = 'force-dynamic';
@@ -60,5 +61,6 @@ export const POST = (req: Request) => manejar(async () => {
     if (esDuplicado(e)) throw new ErrorHttp(409, 'Ya existe una cuenta con ese correo. Inicia sesión.', { correo: 'Correo ya registrado' });
     throw e;
   }
+  await auditar({ nombre: d.nombre, rol: 'docente' }, 'registro.cuenta', 'usuario', null, d.correo, ipDe(req.headers));
   return json({ ok: true }, 201);
 });

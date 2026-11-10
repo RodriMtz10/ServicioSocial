@@ -28,7 +28,7 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
-  allowedDevOrigins: ["192.168.1.189", "localhost:3000", "192.168.1.189:3000", "10.31.13.70:3000", "10.31.13.70"],
+  allowedDevOrigins: ["192.168.1.189", "localhost:3000", "192.168.1.189:3000", "10.31.13.70:3000", "10.31.13.70", "192.168.1.110:3000", "192.168.1.110" ],
   poweredByHeader: false,
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];

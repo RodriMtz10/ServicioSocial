@@ -13,7 +13,12 @@
     "db:desplegar": "prisma migrate deploy",
     "db:estudio": "prisma studio",
     "db:crear-admin": "tsx scripts/crear-admin.ts",
-    "db:catalogos-base": "tsx scripts/catalogos-base.ts"
+    "db:catalogos-base": "tsx scripts/catalogos-base.ts",
+    "respaldo": "node scripts/respaldo.mjs",
+    "restaurar": "node scripts/restaurar.mjs",
+    "verificar": "node scripts/verificar.mjs",
+    "prueba:http": "node scripts/prueba-http.mjs",
+    "recordatorios": "node scripts/recordatorios.mjs"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.9.1",

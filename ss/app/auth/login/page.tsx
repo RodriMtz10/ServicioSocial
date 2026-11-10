@@ -6,6 +6,7 @@ import { useSearchParams } from 'next/navigation';
 import { LogoTecnm } from '@/components/ui/Logo';
 import { EtiquetaCarga } from '@/components/ui/Cargando';
 import BotonTema from '@/components/ui/BotonTema';
+import { useAvisos } from '@/lib/avisos';
 import { PasswordInput, RequisitosPassword } from '@/components/ui/PasswordInput';
 import { SelectDepartamento, SelectPuesto } from '@/components/ui/ListasInstitucionales';
 import { api, ApiError } from '@/lib/api';
@@ -24,7 +25,9 @@ function Acceso() {
   const [info, setInfo] = useState<InfoRegistro | null>(null);
   const [f, setF] = useState({ correo: '', codigo: '', nombre: '', departamento: '', puesto: '', password: '', repetir: '' });
   const [errores, setErrores] = useState<Record<string, string>>({});
-  const [error, setError] = useState('');
+  const avisos = useAvisos();
+  // Errores: ventana emergente al centro (se ven de inmediato, sin tener que desplazarse).
+  const setError = (t: string) => { if (t) avisos.error(t); };
   const [aviso, setAviso] = useState('');
   const [cargando, setCargando] = useState(false);
   const [espera, setEspera] = useState(0);
@@ -76,7 +79,7 @@ function Acceso() {
     setCargando(true);
     try {
       await api('/api/registro', 'POST', { correo: f.correo, codigo: f.codigo, nombre: f.nombre, departamento: f.departamento, puesto: f.puesto, password: f.password });
-      if (!(await entrar(f.correo, f.password))) { setModo('login'); setError('Cuenta creada. Inicia sesión con tu correo y contraseña.'); }
+      if (!(await entrar(f.correo, f.password))) { setModo('login'); avisos.ok('Cuenta creada. Inicia sesión con tu correo y contraseña.'); }
     } catch (err) {
       if (err instanceof ApiError) { setError(err.message); setErrores(err.errores ?? {}); } else setError('Ocurrió un error inesperado.');
     } finally { setCargando(false); }
@@ -90,7 +93,7 @@ function Acceso() {
     try {
       await api('/api/recuperacion', 'POST', { correo: f.correo, codigo: f.codigo, password: f.password });
       setModo('login'); setPaso(1); setF((p) => ({ ...p, codigo: '', password: '', repetir: '' }));
-      setAviso('Contraseña actualizada. Ya puedes iniciar sesión con tu nueva contraseña.');
+      avisos.ok('Contraseña actualizada. Ya puedes iniciar sesión con tu nueva contraseña.');
     } catch (err) {
       if (err instanceof ApiError) { setError(err.message); setErrores(err.errores ?? {}); } else setError('Ocurrió un error inesperado.');
     } finally { setCargando(false); }
@@ -119,7 +122,6 @@ function Acceso() {
             </p>
           </div>
 
-          {error && <div role="alert" className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-xs text-red-600 font-medium">{error}</div>}
           {aviso && <div role="status" className="mb-4 p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-xs text-emerald-800 font-medium">{aviso}</div>}
 
           <div key={`${modo}-${paso}`} className="anim-fade-up">

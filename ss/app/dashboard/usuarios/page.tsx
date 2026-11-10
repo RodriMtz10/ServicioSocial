@@ -1,24 +1,42 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { KeyRound, Pencil, Search, Trash2, UserPlus } from 'lucide-react';
+import { Copy, Pencil, Search, Trash2, UserPlus } from 'lucide-react';
 import RequireRole from '@/components/auth/RequireRole';
 import { Badge } from '@/components/ui/Badge';
 import { Campo, inputCls } from '@/components/ui/Campo';
 import Modal from '@/components/ui/Modal';
 import { Skeleton } from '@/components/ui/Cargando';
+import { useAvisos } from '@/lib/avisos';
 import { SelectDepartamento, SelectPuesto } from '@/components/ui/ListasInstitucionales';
 import { PasswordInput, RequisitosPassword } from '@/components/ui/PasswordInput';
 import { api, ApiError } from '@/lib/api';
 import { useUsuario } from '@/lib/useUsuario';
-import { iniciales } from '@/lib/utils';
+import Avatar from '@/components/ui/Avatar';
+import { generarPassword } from '@/lib/password';
 import type { Role, Usuario } from '@/types';
 
-const btn = 'flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl text-xs font-bold cursor-pointer transition-colors';
+const btn = 'accion flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl text-xs font-bold cursor-pointer transition-colors';
 type Errores = Record<string, string>;
 
 function errorDe(e: unknown): { msg: string; campos: Errores } {
   return e instanceof ApiError ? { msg: e.message, campos: e.errores ?? {} } : { msg: 'Error inesperado', campos: {} };
+}
+
+/** Campo de contraseña para el administrador: con generador de contraseñas seguras y botón para copiarla. */
+function CampoPasswordAdmin({ label, value, onChange, error, autoFocus }: { label: string; value: string; onChange: (v: string) => void; error?: string; autoFocus?: boolean }) {
+  const avisos = useAvisos();
+  const copiar = async () => { try { await navigator.clipboard.writeText(value); avisos.ok('Contraseña copiada.'); } catch { avisos.error('No se pudo copiar; selecciónala y cópiala manualmente.'); } };
+  return (
+    <Campo label={label} error={error}>
+      <PasswordInput autoFocus={autoFocus} autoComplete="new-password" maxLength={72} value={value} onChange={(e) => onChange(e.target.value)} claseInput={inputCls(error)} />
+      <div className="mt-2 flex flex-wrap gap-2">
+        <button type="button" onClick={() => onChange(generarPassword())} className="px-3 py-1.5 rounded-lg border border-gray-200 text-[11px] font-bold text-[#0F3470] hover:bg-blue-50 cursor-pointer">Generar contraseña segura</button>
+        {value && <button type="button" onClick={copiar} className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-gray-200 text-[11px] font-bold text-gray-600 hover:bg-gray-50 cursor-pointer"><Copy size={12} /> Copiar</button>}
+      </div>
+      <div className="mt-2"><RequisitosPassword password={value} /></div>
+    </Campo>
+  );
 }
 
 /** Formulario compartido por "Nuevo usuario" y "Editar usuario". */
@@ -31,12 +49,12 @@ function ModalUsuario({ usuario, esYo, onClose, onGuardado }: {
     rol: (usuario?.rol ?? 'docente') as Role, activo: usuario?.activo ?? true, password: '',
   });
   const [errores, setErrores] = useState<Errores>({});
-  const [error, setError] = useState('');
+  const avisos = useAvisos();
   const [enviando, setEnviando] = useState(false);
   const set = <K extends keyof typeof f>(k: K, v: (typeof f)[K]) => setF((p) => ({ ...p, [k]: v }));
 
   const guardar = async () => {
-    setEnviando(true); setError(''); setErrores({});
+    setEnviando(true); setErrores({});
     try {
       const u = editando
         ? await api<Usuario>(`/api/usuarios/${usuario!.id}`, 'PATCH', { nombre: f.nombre, correo: f.correo, departamento: f.departamento, puesto: f.puesto, ...(esYo ? {} : { rol: f.rol, activo: f.activo }) })
@@ -45,7 +63,7 @@ function ModalUsuario({ usuario, esYo, onClose, onGuardado }: {
       onClose();
     } catch (e) {
       const { msg, campos } = errorDe(e);
-      setError(msg); setErrores(campos);
+      avisos.error(msg); setErrores(campos);
     } finally { setEnviando(false); }
   };
 
@@ -70,46 +88,22 @@ function ModalUsuario({ usuario, esYo, onClose, onGuardado }: {
               <input type="checkbox" disabled={esYo} checked={f.activo} onChange={(e) => set('activo', e.target.checked)} className="w-4 h-4 accent-[#0F3470]" /> Usuario activo
             </label>
           </Campo>
-        ) : (
-          <Campo label="Contraseña inicial" error={errores.password}><PasswordInput autoComplete="new-password" maxLength={72} value={f.password} onChange={(e) => set('password', e.target.value)} claseInput={inputCls(errores.password)} /><div className="mt-2"><RequisitosPassword password={f.password} /></div></Campo>
-        )}
+        ) : null}
+        {!editando && <div className="sm:col-span-2"><CampoPasswordAdmin label="Contraseña inicial" value={f.password} onChange={(v) => set('password', v)} error={errores.password} /></div>}
       </div>
       {esYo && <p className="text-[11px] text-gray-500">Es tu propia cuenta: no puedes quitarte el rol de administrador ni desactivarte.</p>}
-      {error && <p role="alert" className="text-[11px] font-semibold text-red-600">{error}</p>}
-    </Modal>
-  );
-}
-
-function ModalPassword({ u, onClose }: { u: Usuario; onClose: () => void }) {
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
-  const [ok, setOk] = useState(false);
-  const guardar = async () => {
-    setError('');
-    try { await api(`/api/usuarios/${u.id}`, 'PATCH', { password }); setOk(true); } catch (e) { const { msg, campos } = errorDe(e); setError(campos.password ?? msg); }
-  };
-  return (
-    <Modal titulo={`Nueva contraseña · ${u.nombre}`} onClose={onClose} pie={
-      <>
-        <button className={`${btn} border border-gray-300 text-gray-600`} onClick={onClose}>{ok ? 'Cerrar' : 'Cancelar'}</button>
-        {!ok && <button className={`${btn} bg-[#0F3470] text-white`} onClick={guardar}>Guardar contraseña</button>}
-      </>
-    }>
-      {ok ? <p className="text-xs text-emerald-700 font-semibold">Contraseña actualizada. Si la cuenta estaba bloqueada por intentos fallidos, también se desbloqueó.</p> : (
-        <Campo label="Nueva contraseña"><PasswordInput autoFocus autoComplete="new-password" maxLength={72} value={password} onChange={(e) => setPassword(e.target.value)} claseInput={inputCls()} /><div className="mt-2"><RequisitosPassword password={password} /></div></Campo>
-      )}
-      {error && <p role="alert" className="text-[11px] font-semibold text-red-600">{error}</p>}
     </Modal>
   );
 }
 
 /** Confirmación para eliminar. Si el usuario tiene requisiciones el servidor lo impide y se ofrece desactivarlo. */
 function ModalEliminar({ u, onClose, onEliminado, onDesactivar }: { u: Usuario; onClose: () => void; onEliminado: () => void; onDesactivar: () => Promise<void> }) {
+  const avisos = useAvisos();
   const [error, setError] = useState('');
   const [enviando, setEnviando] = useState(false);
   const eliminar = async () => {
     setEnviando(true); setError('');
-    try { await api(`/api/usuarios/${u.id}`, 'DELETE'); onEliminado(); onClose(); } catch (e) { setError(errorDe(e).msg); } finally { setEnviando(false); }
+    try { await api(`/api/usuarios/${u.id}`, 'DELETE'); onEliminado(); onClose(); } catch (e) { const m = errorDe(e).msg; setError(m); avisos.error(m); } finally { setEnviando(false); }
   };
   return (
     <Modal titulo="Eliminar usuario" onClose={onClose} pie={
@@ -130,12 +124,12 @@ function ModalEliminar({ u, onClose, onEliminado, onDesactivar }: { u: Usuario; 
 function Panel() {
   const { usuario: yo } = useUsuario();
   const [lista, setLista] = useState<Usuario[] | null>(null);
-  const [error, setError] = useState('');
+  const avisos = useAvisos();
   const [q, setQ] = useState('');
-  const [modal, setModal] = useState<null | { tipo: 'nuevo' } | { tipo: 'editar'; u: Usuario } | { tipo: 'password'; u: Usuario } | { tipo: 'eliminar'; u: Usuario }>(null);
+  const [modal, setModal] = useState<null | { tipo: 'nuevo' } | { tipo: 'editar'; u: Usuario } | { tipo: 'eliminar'; u: Usuario }>(null);
 
   const cargar = useCallback(async () => {
-    try { setLista(await api<Usuario[]>('/api/usuarios')); } catch (e) { setError(errorDe(e).msg); }
+    try { setLista(await api<Usuario[]>('/api/usuarios')); } catch (e) { avisos.error(errorDe(e).msg); }
   }, []);
   useEffect(() => { void cargar(); }, [cargar]);
 
@@ -148,16 +142,15 @@ function Panel() {
   }, [lista, q]);
 
   const alternar = async (u: Usuario) => {
-    setError('');
-    try { guardado(await api<Usuario>(`/api/usuarios/${u.id}`, 'PATCH', { activo: !u.activo })); } catch (e) { setError(errorDe(e).msg); }
+    try { guardado(await api<Usuario>(`/api/usuarios/${u.id}`, 'PATCH', { activo: !u.activo })); } catch (e) { avisos.error(errorDe(e).msg); }
   };
 
+  const chip = 'accion flex items-center gap-1 px-2 py-1.5 rounded-lg border text-[11px] font-bold cursor-pointer';
   const acciones = (u: Usuario) => (
-    <div className="flex flex-wrap gap-1.5 md:justify-end">
-      <button onClick={() => setModal({ tipo: 'editar', u })} className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-gray-200 text-[11px] font-bold text-[#0F3470] hover:bg-blue-50 cursor-pointer"><Pencil size={13} /> Editar</button>
-      <button onClick={() => setModal({ tipo: 'password', u })} className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-gray-200 text-[11px] font-bold text-gray-600 hover:bg-gray-50 cursor-pointer"><KeyRound size={13} /> Contraseña</button>
-      {u.id !== yo?.id && <button onClick={() => alternar(u)} className="px-2.5 py-1.5 rounded-lg border border-gray-200 text-[11px] font-bold text-gray-600 hover:bg-gray-50 cursor-pointer">{u.activo ? 'Desactivar' : 'Activar'}</button>}
-      {u.id !== yo?.id && <button onClick={() => setModal({ tipo: 'eliminar', u })} aria-label={`Eliminar a ${u.nombre}`} className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-red-200 text-[11px] font-bold text-red-600 hover:bg-red-50 cursor-pointer"><Trash2 size={13} /> Eliminar</button>}
+    <div className="flex flex-wrap md:flex-nowrap items-center gap-1.5 md:justify-end">
+      <button onClick={() => setModal({ tipo: 'editar', u })} title="Editar datos, rol o acceso" className={`${chip} border-gray-200 text-[#0F3470] hover:bg-blue-50`}><Pencil size={13} /> Editar</button>
+      {u.id !== yo?.id && <button onClick={() => alternar(u)} className={`${chip} border-gray-200 text-gray-600 hover:bg-gray-50`}>{u.activo ? 'Desactivar' : 'Activar'}</button>}
+      {u.id !== yo?.id && <button onClick={() => setModal({ tipo: 'eliminar', u })} title="Eliminar usuario" aria-label={`Eliminar a ${u.nombre}`} className={`${chip} border-red-200 text-red-600 hover:bg-red-50 md:ml-2`}><Trash2 size={13} /></button>}
     </div>
   );
 
@@ -178,7 +171,6 @@ function Panel() {
             <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar por nombre, correo, departamento o puesto…" aria-label="Buscar usuarios" className="w-full py-2.5 text-xs outline-none text-gray-800 bg-transparent" />
           </div>
         </div>
-        {error && <p role="alert" className="px-4 py-2 text-[11px] font-semibold text-red-600 bg-red-50">{error}</p>}
 
         {!lista ? <div className="p-4 space-y-3" role="status" aria-live="polite"><span className="sr-only">Cargando usuarios…</span>{[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-14 w-full" />)}</div> : filtrada.length === 0 ? (
           <p className="py-10 text-center text-xs text-gray-400">No hay usuarios que coincidan.</p>
@@ -189,7 +181,7 @@ function Panel() {
               {filtrada.map((u) => (
                 <li key={u.id} className={`p-4 space-y-2 ${u.activo ? '' : 'opacity-60'}`}>
                   <div className="flex items-start gap-3">
-                    <span className="w-9 h-9 rounded-full bg-blue-50 text-[#0F3470] text-xs font-bold flex items-center justify-center shrink-0">{iniciales(u.nombre)}</span>
+                    <Avatar nombre={u.nombre} foto={u.foto} clase="w-9 h-9 text-xs" colores="bg-blue-50 text-[#0F3470]" />
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-bold text-slate-800">{u.nombre}</p>
                       <p className="text-[11px] text-gray-500 break-all">{u.correo}</p>
@@ -208,7 +200,7 @@ function Panel() {
                 <tbody className="anim-stagger divide-y divide-gray-50">
                   {filtrada.map((u) => (
                     <tr key={u.id} className={u.activo ? '' : 'opacity-60'}>
-                      <td className="px-4 py-3"><div className="flex items-center gap-2.5"><span className="w-8 h-8 rounded-full bg-blue-50 text-[#0F3470] text-xs font-bold flex items-center justify-center shrink-0">{iniciales(u.nombre)}</span><div><p className="font-bold text-slate-800">{u.nombre}</p><p className="text-[11px] text-gray-400">{u.puesto}</p></div></div></td>
+                      <td className="px-4 py-3"><div className="flex items-center gap-2.5"><Avatar nombre={u.nombre} foto={u.foto} colores="bg-blue-50 text-[#0F3470]" /><div><p className="font-bold text-slate-800">{u.nombre}</p><p className="text-[11px] text-gray-400">{u.puesto}</p></div></div></td>
                       <td className="px-4 py-3 text-gray-600">{u.correo}</td>
                       <td className="px-4 py-3 text-gray-600">{u.departamento}</td>
                       <td className="px-4 py-3"><Badge tono={u.rol === 'admin' ? 'violet' : 'blue'}>{u.rol === 'admin' ? 'Administrador SGI' : 'Docente'}</Badge></td>
@@ -227,7 +219,6 @@ function Panel() {
       {modal?.tipo === 'nuevo' && <ModalUsuario onClose={() => setModal(null)} onGuardado={guardado} />}
       {modal?.tipo === 'editar' && <ModalUsuario usuario={modal.u} esYo={modal.u.id === yo?.id} onClose={() => setModal(null)} onGuardado={guardado} />}
       {modal?.tipo === 'eliminar' && <ModalEliminar u={modal.u} onClose={() => setModal(null)} onEliminado={() => setLista((l) => (l ?? []).filter((x) => x.id !== modal.u.id))} onDesactivar={() => alternar(modal.u)} />}
-      {modal?.tipo === 'password' && <ModalPassword u={modal.u} onClose={() => setModal(null)} />}
     </div>
   );
 }
