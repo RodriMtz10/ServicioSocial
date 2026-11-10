@@ -29,6 +29,7 @@ interface Ctx {
   devolver: (id: string, comentario: string) => Promise<Requisicion | null>;
   marcarAccion: (id: string, accionId: string, completado: boolean) => Promise<Requisicion | null>;
   solicitarVerificacion: (id: string) => Promise<Requisicion | null>;
+  cambiarEstado: (id: string, estado: 'borrador' | 'en_proceso' | 'verificacion', comentario?: string) => Promise<Requisicion | null>;
   cerrar: (id: string, cierre: CierreInput) => Promise<Requisicion | null>;
   agregarEvidencia: (id: string, e: { nombre: string; tamano: string }) => Promise<Requisicion | null>;
   quitarEvidencia: (id: string, evidenciaId: string) => Promise<Requisicion | null>;
@@ -104,8 +105,9 @@ export function RequisicionesProvider({ children }: { children: React.ReactNode 
     devolver: (id, comentario) => transicion(id, { accion: 'devolver', comentario }),
     marcarAccion: (id, accionId, completado) => transicion(id, { accion: 'marcar', accionId, completado }),
     solicitarVerificacion: (id) => transicion(id, { accion: 'solicitar_verificacion' }),
+    cambiarEstado: async (id, estado, comentario) => { const r = await transicion(id, { accion: 'cambiar_estado', estado, comentario: comentario || undefined }); if (r) setAviso({ tipo: 'ok', texto: 'Estado actualizado.' }); return r; },
     cerrar: (id, cierre) => transicion(id, { accion: 'cerrar', cierre }),
-    agregarEvidencia: (id, evidencia) => transicion(id, { accion: 'agregar_evidencia', evidencia }),
+    agregarEvidencia: async (id, evidencia) => { const r = await transicion(id, { accion: 'agregar_evidencia', evidencia }); if (r) setAviso({ tipo: 'ok', texto: `Evidencia «${evidencia.nombre}» adjuntada.` }); return r; },
     quitarEvidencia: (id, evidenciaId) => transicion(id, { accion: 'quitar_evidencia', evidenciaId }),
     eliminar: async (id) => {
       try {
