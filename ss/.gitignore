@@ -43,3 +43,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# evidencias subidas y respaldos (datos reales: nunca al repositorio)
+/storage
+/respaldos

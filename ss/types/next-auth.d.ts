@@ -8,6 +8,7 @@ declare module 'next-auth' {
     department: string;
     puesto: string;
     emitido: number;
+    foto: string | null;
   }
   interface Session {
     user: {
@@ -18,6 +19,7 @@ declare module 'next-auth' {
       department: string;
       puesto: string;
       emitido: number;
+      foto: string | null;
     };
   }
 }
@@ -28,5 +30,6 @@ declare module 'next-auth/jwt' {
     department?: string;
     puesto?: string;
     emitido?: number;
+    foto?: string | null;
   }
 }

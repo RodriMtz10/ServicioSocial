@@ -5,13 +5,16 @@ import type { Actor } from '@/lib/server/actor';
 import { ErrorHttp } from '@/lib/server/http';
 import { aFecha, anioMX, hoyMX } from '@/lib/server/fechas';
 import { incluir, serializar } from '@/lib/server/serializar';
+import { auditar } from '@/lib/server/auditoria';
+import { borrarArchivo } from '@/lib/server/archivos';
 import { errorEnvio, type AdminEditar, type Datos, type Transicion } from '@/lib/validacion';
 
 type Tx = Prisma.TransactionClient;
 type Estado = Requisicion['estado'];
 
-const planCreate = (d: Datos) =>
-  d.planAccion.map((p, i) => ({ orden: i, accion: p.accion, responsable: p.responsable, fechaProgramada: p.fechaProgramada ? aFecha(p.fechaProgramada) : null, evidencia: p.evidencia, completado: p.completado }));
+const filaPlan = (p: Datos['planAccion'][number], i: number) =>
+  ({ orden: i, accion: p.accion, responsable: p.responsable, fechaProgramada: p.fechaProgramada ? aFecha(p.fechaProgramada) : null, evidencia: p.evidencia, completado: p.completado });
+const planCreate = (d: Datos) => d.planAccion.map(filaPlan);
 
 const camposDatos = (d: Datos) => ({
   descripcion: d.descripcion, responsableDefinir: d.responsableDefinir, responsableVerificar: d.responsableVerificar,
@@ -44,15 +47,25 @@ async function cambiarEstado(tx: Tx, id: string, desde: Estado[], data: Prisma.R
   if (res.count !== 1) throw new ErrorHttp(409, 'La requisición cambió de estado mientras la editabas. Recarga la página.');
 }
 
-/** Sincroniza evidencias: conserva las que ya existen (por id), borra las ausentes y crea las nuevas. */
-async function sincronizarEvidencias(tx: Tx, requisicionId: string, lista: NonNullable<Datos['evidencias']>) {
-  const existentes = await tx.evidencia.findMany({ where: { requisicionId }, select: { id: true } });
+/**
+ * Sincroniza el plan de acción conservando las acciones que ya existen (por id) para no perder sus evidencias:
+ * actualiza las existentes, crea las nuevas y borra las que ya no están (sus evidencias quedan como generales).
+ */
+async function sincronizarPlan(tx: Tx, requisicionId: string, plan: Datos['planAccion']) {
+  const existentes = await tx.accionPlan.findMany({ where: { requisicionId }, select: { id: true } });
   const ids = new Set<string>(existentes.map((e: { id: string }) => e.id));
-  const conservar = new Set(lista.filter((e) => e.id && ids.has(e.id)).map((e) => e.id as string));
-  const borrar = [...ids].filter((i) => !conservar.has(i));
-  if (borrar.length) await tx.evidencia.deleteMany({ where: { requisicionId, id: { in: borrar } } });
-  const nuevas = lista.filter((e) => !e.id || !ids.has(e.id));
-  if (nuevas.length) await tx.evidencia.createMany({ data: nuevas.map((e) => ({ requisicionId, nombre: e.nombre, tamano: e.tamano })) });
+  const conservar = new Set<string>();
+  for (let i = 0; i < plan.length; i++) {
+    const p = plan[i];
+    if (p.id && ids.has(p.id) && !conservar.has(p.id)) {
+      await tx.accionPlan.update({ where: { id: p.id }, data: filaPlan(p, i) });
+      conservar.add(p.id);
+    } else {
+      await tx.accionPlan.create({ data: { ...filaPlan(p, i), requisicionId } });
+    }
+  }
+  const borrar = [...ids].filter((x) => !conservar.has(x));
+  if (borrar.length) await tx.accionPlan.deleteMany({ where: { requisicionId, id: { in: borrar } } });
 }
 
 /* ───────────────────────── consultas ───────────────────────── */
@@ -78,7 +91,7 @@ const ELIMINABLE_POR_DOCENTE: Estado[] = ['borrador', 'devuelta', 'pendiente'];
  * El borrado es condicional (id + dueño + estado) para que un cambio de estado simultáneo no lo eluda.
  */
 export async function eliminar(a: Actor, id: string): Promise<void> {
-  const r = await prisma.requisicion.findUnique({ where: { id } });
+  const r = await prisma.requisicion.findUnique({ where: { id }, include: { evidencias: { select: { clave: true } } } });
   if (!r || (a.rol !== 'admin' && r.solicitanteId !== a.id)) throw new ErrorHttp(404, 'Requisición no encontrada');
   if (a.rol !== 'admin' && !ELIMINABLE_POR_DOCENTE.includes(r.estado as Estado)) {
     throw new ErrorHttp(403, 'Esta requisición ya está en proceso o cerrada. Solo un administrador puede eliminarla.');
@@ -87,7 +100,8 @@ export async function eliminar(a: Actor, id: string): Promise<void> {
     where: a.rol === 'admin' ? { id } : { id, solicitanteId: a.id, estado: { in: ELIMINABLE_POR_DOCENTE } },
   });
   if (res.count !== 1) throw new ErrorHttp(409, 'La requisición cambió de estado y ya no se puede eliminar. Recarga la página.');
-  console.log(`[auditoría] ${a.nombre} <${a.correo}> (${a.rol}) eliminó la requisición ${r.folio ?? r.id} (estado: ${r.estado})`);
+  for (const e of r.evidencias as { clave: string | null }[]) await borrarArchivo(e.clave);
+  await auditar(a, 'requisicion.eliminar', 'requisicion', id, `${r.folio ?? r.id} (estado: ${r.estado}; ${r.evidencias.length} archivos)`);
 }
 
 /* ───────────────────── crear / guardar / enviar ───────────────────── */
@@ -117,16 +131,13 @@ export async function guardar(a: Actor, datos: Datos, enviar: boolean, id?: stri
       });
       reqId = r.id;
       await evento(tx, reqId, a, 'creada');
-      if (datos.evidencias?.length) await sincronizarEvidencias(tx, reqId, datos.evidencias);
     } else {
       reqId = id;
       const actual = await tx.requisicion.findFirst({ where: { id: reqId, solicitanteId: a.id } });
       if (!actual) throw new ErrorHttp(404, 'Requisición no encontrada');
       if (actual.estado !== 'borrador' && actual.estado !== 'devuelta') throw new ErrorHttp(409, 'Solo se editan borradores o requisiciones devueltas');
       await cambiarEstado(tx, reqId, [actual.estado], camposDatos(datos));
-      await tx.accionPlan.deleteMany({ where: { requisicionId: reqId } });
-      await tx.accionPlan.createMany({ data: planCreate(datos).map((p) => ({ ...p, requisicionId: reqId })) });
-      await sincronizarEvidencias(tx, reqId, datos.evidencias ?? []);
+      await sincronizarPlan(tx, reqId, datos.planAccion);
     }
     if (enviar) {
       const reenvio = !!id;
@@ -134,6 +145,9 @@ export async function guardar(a: Actor, datos: Datos, enviar: boolean, id?: stri
       await evento(tx, reqId, a, 'enviada', reenvio ? 'Reenviada tras correcciones' : undefined);
     }
     return (await cargar(tx, reqId)) as Requisicion;
+  }).then(async (r) => {
+    if (enviar) await auditar(a, id ? 'requisicion.reenviar' : 'requisicion.enviar', 'requisicion', r.id, r.folio); // los borradores no se registran
+    return r;
   });
 }
 
@@ -145,14 +159,12 @@ function exigir(cond: boolean, msg: string, status = 403) {
 
 /** Cambios de estado que el propio solicitante puede hacer (cerrar y aprobar son solo del administrador). */
 const TRANSICIONES_DOCENTE: Partial<Record<Estado, Estado[]>> = {
-  pendiente: ['borrador'],
   en_proceso: ['verificacion'],
   verificacion: ['en_proceso'],
 };
 const NOMBRE_ESTADO: Record<Estado, string> = {
   borrador: 'borrador', pendiente: 'pendiente de aprobación', devuelta: 'devuelta', en_proceso: 'en proceso', verificacion: 'en verificación', cerrada: 'cerrada',
 };
-const EN_TRABAJO: Estado[] = ['borrador', 'devuelta', 'en_proceso', 'verificacion'];
 const pendientes = (acc: { completado: boolean }[]) => {
   const n = acc.filter((x) => !x.completado).length;
   return n ? `Con ${n} ${n === 1 ? 'acción pendiente' : 'acciones pendientes'}` : undefined;
@@ -163,8 +175,9 @@ export async function transicion(a: Actor, id: string, t: Transicion): Promise<R
   const estado = base.estado as Estado;
   const esDueno = base.solicitanteId === a.id;
   const esAdmin = a.rol === 'admin';
+  const archivosABorrar: (string | null)[] = [];
 
-  return prisma.$transaction(async (tx) => {
+  const resultado = await prisma.$transaction(async (tx) => {
     switch (t.accion) {
       case 'aprobar':
         exigir(esAdmin, 'Solo el administrador puede aprobar');
@@ -175,9 +188,10 @@ export async function transicion(a: Actor, id: string, t: Transicion): Promise<R
 
       case 'devolver':
         exigir(esAdmin, 'Solo el administrador puede devolver');
-        exigir(estado === 'pendiente', 'Solo se devuelven requisiciones pendientes', 409);
-        await cambiarEstado(tx, id, ['pendiente'], { estado: 'devuelta' });
-        await evento(tx, id, a, 'devuelta', t.comentario);
+        // En la revisión inicial vuelve al solicitante para corregir y reenviar; en la verificación regresa a "en proceso".
+        exigir(estado === 'pendiente' || estado === 'verificacion', 'Solo se devuelven requisiciones pendientes o en verificación', 409);
+        await cambiarEstado(tx, id, [estado], { estado: estado === 'pendiente' ? 'devuelta' : 'en_proceso' });
+        await evento(tx, id, a, 'devuelta', t.comentario || undefined);
         break;
 
       case 'marcar': {
@@ -222,25 +236,46 @@ export async function transicion(a: Actor, id: string, t: Transicion): Promise<R
         break;
       }
 
-      case 'agregar_evidencia':
-        exigir(esDueno, 'Solo el solicitante adjunta evidencias');
-        exigir(EN_TRABAJO.includes(estado), 'Ya no se pueden adjuntar archivos', 409);
-        await tx.evidencia.create({ data: { requisicionId: id, nombre: t.evidencia.nombre, tamano: t.evidencia.tamano } });
-        if (estado === 'en_proceso' || estado === 'verificacion') await evento(tx, id, a, 'avance', `Evidencia adjuntada: ${t.evidencia.nombre}`);
+      case 'agregar_accion': {
+        exigir(esDueno, 'Solo el solicitante agrega acciones a su plan');
+        exigir(estado === 'en_proceso', 'Solo se agregan acciones mientras la requisición está en proceso', 409);
+        exigir(base.acciones.length < 50, 'El plan ya tiene el máximo de 50 acciones', 409);
+        exigir(t.nueva.fechaProgramada >= hoyMX(), 'La fecha programada no puede ser anterior a hoy', 400);
+        const orden = base.acciones.length;
+        await tx.accionPlan.create({ data: { requisicionId: id, orden, accion: t.nueva.accion, responsable: t.nueva.responsable, fechaProgramada: aFecha(t.nueva.fechaProgramada), evidencia: t.nueva.evidencia, completado: false } });
+        await evento(tx, id, a, 'avance', `Acción agregada: ${t.nueva.accion}`);
         break;
+      }
 
       case 'quitar_evidencia': {
-        exigir(esDueno, 'Solo el solicitante quita evidencias');
-        exigir(EN_TRABAJO.includes(estado), 'Ya no se pueden quitar archivos', 409);
+        exigir(esAdmin || esDueno, 'Solo el solicitante o el administrador quitan evidencias');
+        exigir(estado !== 'cerrada', 'La requisición está cerrada (solo lectura): no se pueden quitar evidencias', 409);
+        if (!esAdmin) exigir(estado === 'en_proceso', 'Solo se quitan evidencias mientras la requisición está en proceso', 409);
         const ev = base.evidencias.find((x) => x.id === t.evidenciaId);
+        if (!ev) throw new ErrorHttp(404, 'Evidencia no encontrada');
         const res = await tx.evidencia.deleteMany({ where: { id: t.evidenciaId, requisicionId: id } });
         if (res.count !== 1) throw new ErrorHttp(404, 'Evidencia no encontrada');
-        if (estado === 'en_proceso' || estado === 'verificacion') await evento(tx, id, a, 'avance', `Evidencia quitada: ${ev?.nombre ?? ''}`);
+        archivosABorrar.push(ev.clave);
+        await evento(tx, id, a, 'avance', `Evidencia quitada: ${ev.nombre}`);
         break;
       }
     }
     return (await cargar(tx, id)) as Requisicion;
   });
+  for (const c of archivosABorrar) await borrarArchivo(c);
+  if (!['marcar', 'agregar_accion', 'quitar_evidencia'].includes(t.accion)) await auditar(a, `requisicion.${t.accion === 'solicitar_verificacion' ? 'verificacion' : t.accion === 'cambiar_estado' ? 'estado' : t.accion === 'quitar_evidencia' ? 'evidencia.quitar' : t.accion}`, 'requisicion', id, auditoriaDetalle(base.folio, estado, t));
+  return resultado;
+}
+
+function auditoriaDetalle(folio: string, estado: string, t: Transicion): string {
+  switch (t.accion) {
+    case 'cambiar_estado': return `${folio}: ${estado} → ${t.estado}`;
+    case 'devolver': return `${folio}${t.comentario ? ` · motivo: ${t.comentario}` : ''}`;
+    case 'cerrar': return `${folio}: causa raíz ${t.cierre.causaEliminada ? 'eliminada (cerrada)' : 'NO eliminada (devuelta)'}`;
+    case 'agregar_accion': return `${folio}: ${t.nueva.accion}`;
+    case 'marcar': return `${folio}: ${t.completado ? 'completada' : 'reabierta'} (${t.accionId})`;
+    default: return folio;
+  }
 }
 
 /* ──────────────── edición del administrador (en cualquier momento) ──────────────── */
@@ -285,9 +320,6 @@ export async function adminEditar(a: Actor, id: string, input: AdminEditar): Pro
     const c0 = actual.cierre;
     if (cierre.causaEliminada !== (c0?.causaEliminada ?? null) || cierre.observaciones !== (c0?.observaciones ?? '') || cierre.fechaCierre !== (c0?.fechaCierre ?? '') || cierre.firmaRD !== (c0?.firmaRD ?? '')) cambios.push('Datos de cierre');
   }
-  const evActuales = actual.evidencias.map((e) => e.id).sort().join();
-  const evNuevas = (d.evidencias ?? actual.evidencias).map((e) => e.id ?? 'nuevo').sort().join();
-  if (d.evidencias && evActuales !== evNuevas) cambios.push('Evidencias');
   if (cambios.length === 0) return actual;
 
   return prisma.$transaction(async (tx) => {
@@ -296,12 +328,13 @@ export async function adminEditar(a: Actor, id: string, input: AdminEditar): Pro
       : {};
     await cambiarEstado(tx, id, [actual.estado as Estado], { ...camposDatos(d), ...cierreData, estado: nuevoEstado });
 
-    await tx.accionPlan.deleteMany({ where: { requisicionId: id } });
-    await tx.accionPlan.createMany({ data: planCreate(d).map((p) => ({ ...p, requisicionId: id })) });
-    if (d.evidencias) await sincronizarEvidencias(tx, id, d.evidencias);
+    await sincronizarPlan(tx, id, d.planAccion);
 
     await evento(tx, id, a, 'editada', `${cambios.join('; ')}${input.motivo ? `. Motivo: ${input.motivo}` : ''}`);
     return (await cargar(tx, id)) as Requisicion;
+  }).then(async (r) => {
+    await auditar(a, 'requisicion.editar', 'requisicion', id, `${actual.folio}: ${cambios.join('; ')}`);
+    return r;
   });
 }
 

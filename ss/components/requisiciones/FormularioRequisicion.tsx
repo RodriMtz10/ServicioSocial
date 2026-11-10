@@ -11,8 +11,10 @@ import { SelectCerrado } from '@/components/ui/ListasInstitucionales';
 import { RESPONSABLES_BASE } from '@/lib/institucional';
 import { aDatos, deRequisicion, filaPlan, validar, valoresVacios, type FormValues } from '@/lib/formulario';
 import { useRequisiciones } from '@/lib/store';
+import { useAvisos } from '@/lib/avisos';
+import { TEXTO_FORMATOS } from '@/lib/evidencia';
 import { useUsuario } from '@/lib/useUsuario';
-import { ESTADOS, fmtFecha, hoy, uid } from '@/lib/utils';
+import { ESTADOS, fmtFecha, hoy } from '@/lib/utils';
 import type { EstadoRequisicion } from '@/types';
 
 const draftKey = (userId: string) => `itm-ac:draft:${userId}`;
@@ -62,7 +64,7 @@ export default function FormularioRequisicion({ id }: { id?: string }) {
   const [estadoA, setEstadoA] = useState<EstadoRequisicion>('borrador');
   const [cierreA, setCierreA] = useState({ causaEliminada: '' as '' | 'si' | 'no', observaciones: '', fechaCierre: '', firmaRD: '' });
   const [motivo, setMotivo] = useState('');
-  const [errAdmin, setErrAdmin] = useState('');
+  const avisos = useAvisos();
 
   const inicio = esAdmin ? '/dashboard/tablero' : '/dashboard/mis-solicitudes';
   // El admin edita cualquier requisición, salvo su propio borrador/devuelta, que sigue el flujo normal de envío.
@@ -121,16 +123,16 @@ export default function FormularioRequisicion({ id }: { id?: string }) {
   const delFila = (i: number) =>
     setV((p) => (p ? { ...p, planAccion: p.planAccion.length > 1 ? p.planAccion.filter((_, j) => j !== i) : [filaPlan()] } : p));
 
-  const subirEvidencia = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0];
-    if (!f) return;
-    setV((p) => (p ? { ...p, evidencias: [...p.evidencias, { id: uid(), nombre: f.name, tamano: `${Math.max(1, Math.round(f.size / 1024))} KB`, fecha: fmtFecha(hoy()) }] } : p));
-    e.target.value = '';
-  };
-
   const limpiarBorrador = () => { try { localStorage.removeItem(draftKey(usuario.id)); } catch { /* ignorar */ } };
 
   const irAlDetalle = (rid: string) => router.push(`/dashboard/requisiciones/${rid}`);
+  const ETIQ: Record<string, string> = { descripcion: 'Descripción de la no conformidad', responsableDefinir: 'Quién define la acción', responsableVerificar: 'Quién verifica la implantación', requiereAC: 'Acción correctiva / corrección (dictamen)', requiereCorreccion: 'Corrección (dictamen)', tecnicaSel: 'Técnica utilizada', tecnicaOtra: 'Técnica (especificar)', causaRaiz: 'Causa raíz', accionRealizar: 'Acción o corrección determinada', planAccion: 'Plan de acción', definio: 'Quién definió la acción', verifico: 'Quién verificó el plan' };
+  const nombreCampo = (k: string) => { const m = k.match(/^planAccion\.(\d+)\.(\w+)$/); return m ? `Plan de acción, fila ${Number(m[1]) + 1} (${m[2] === 'accion' ? 'acción' : m[2] === 'fechaProgramada' ? 'fecha' : m[2]})` : ETIQ[k] ?? k; };
+  const faltan = () => {
+    const nombres = [...new Set(Object.keys(todos).map(nombreCampo))];
+    const lista = nombres.slice(0, 6).join('; ') + (nombres.length > 6 ? `; y ${nombres.length - 6} más` : '');
+    avisos.error(`Faltan datos por completar: ${lista}.${modoAdmin ? ' Si necesitas guardarla incompleta, cambia el estado a Borrador o Devuelta.' : ''}`);
+  };
   const irAlPrimerError = () => setTimeout(() => document.querySelector('[data-invalid="true"]')?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 30);
 
   const onBorrador = async () => {
@@ -144,7 +146,7 @@ export default function FormularioRequisicion({ id }: { id?: string }) {
   const onEnviar = async () => {
     if (guardando) return;
     setIntento(true);
-    if (Object.keys(todos).length) { irAlPrimerError(); return; }
+    if (Object.keys(todos).length) { faltan(); irAlPrimerError(); return; }
     setGuardando(true);
     const r = await guardar(aDatos(v), id, true);
     setGuardando(false);
@@ -154,11 +156,10 @@ export default function FormularioRequisicion({ id }: { id?: string }) {
   const onAdminGuardar = async () => {
     if (guardando || !id) return;
     setIntento(true);
-    setErrAdmin('');
     // Una requisición activa debe estar completa; solo borrador/devuelta admiten datos a medias.
-    if (!['borrador', 'devuelta'].includes(estadoA) && Object.keys(todos).length) { irAlPrimerError(); return; }
+    if (!['borrador', 'devuelta'].includes(estadoA) && Object.keys(todos).length) { faltan(); irAlPrimerError(); return; }
     if (estadoA === 'cerrada' && (!cierreA.causaEliminada || !cierreA.fechaCierre || !cierreA.firmaRD.trim())) {
-      setErrAdmin('Para dejarla cerrada indica si se eliminó la causa raíz, la fecha de cierre y la firma del RD.');
+      avisos.error('Para dejarla cerrada indica si se eliminó la causa raíz, la fecha de cierre y la firma del RD.');
       return;
     }
     setGuardando(true);
@@ -169,7 +170,7 @@ export default function FormularioRequisicion({ id }: { id?: string }) {
       motivo: motivo.trim() || undefined,
     });
     setGuardando(false);
-    if (r) irAlDetalle(r.id);
+    if (r) { if (r.historial.length === existente?.historial.length) avisos.ok('No había cambios que guardar.'); irAlDetalle(r.id); }
   };
 
   const devolucion = existente?.estado === 'devuelta' ? [...existente.historial].reverse().find((e) => e.tipo === 'devuelta' || e.tipo === 'reabierta') : undefined;
@@ -288,24 +289,8 @@ export default function FormularioRequisicion({ id }: { id?: string }) {
           {errores.planAccion && <p className="text-[11px] font-semibold text-red-600">{errores.planAccion}</p>}
           {Object.keys(errores).some((k) => k.startsWith('planAccion.')) && <p className="text-[11px] font-semibold text-red-600">Completa todos los campos de cada acción del plan.</p>}
 
-          <div className="pt-3 border-t border-gray-100">
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-xs font-bold text-gray-600">Archivos de evidencia (opcional)</p>
-              <label className="flex items-center gap-1 text-xs font-bold text-[#0F3470] bg-amber-400/20 hover:bg-amber-400/30 px-3 py-1.5 rounded-lg border border-amber-300 cursor-pointer">
-                <Paperclip size={13} /> Adjuntar archivo
-                <input type="file" onChange={subirEvidencia} className="hidden" />
-              </label>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {v.evidencias.map((ev) => (
-                <div key={ev.id} className="p-2.5 bg-gray-50 rounded-xl border border-gray-200 flex items-center justify-between">
-                  <div className="min-w-0"><p className="text-xs font-bold text-gray-800 truncate">{ev.nombre}</p><p className="text-[10px] text-gray-400">{ev.tamano}</p></div>
-                  <button type="button" onClick={() => set('evidencias', v.evidencias.filter((x) => x.id !== ev.id))} className="text-xs font-bold text-red-500 hover:text-red-700 p-1 cursor-pointer">Quitar</button>
-                </div>
-              ))}
-            </div>
-            <p className="text-[10px] text-gray-400 mt-1.5">Por ahora solo se registra el nombre del archivo; la subida real al servidor es una fase posterior.</p>
-          </div>
+          <p className="pt-3 border-t border-gray-100 text-[11px] text-gray-500 flex items-start gap-1.5"><Paperclip size={12} className="shrink-0 mt-0.5" aria-hidden="true" />
+            Los archivos de evidencia se adjuntan a cada acción desde la vista de la requisición, una vez que el SGI la aprueba y pasa a «en proceso». {TEXTO_FORMATOS}</p>
         </Seccion>
 
         {/* 5. CIERRE */}
@@ -355,7 +340,6 @@ export default function FormularioRequisicion({ id }: { id?: string }) {
               <Campo label="Observaciones de eficacia" num={13}><textarea rows={2} value={cierreA.observaciones} onChange={(e) => setCierreA({ ...cierreA, observaciones: e.target.value })} className={inputCls()} /></Campo>
               <Campo label="Nombre y firma RD" num={16}><input value={cierreA.firmaRD} onChange={(e) => setCierreA({ ...cierreA, firmaRD: e.target.value })} className={inputCls()} /></Campo>
             </div>
-            {errAdmin && <p role="alert" className="text-[11px] font-semibold text-red-600">{errAdmin}</p>}
           </Seccion>
         )}
 

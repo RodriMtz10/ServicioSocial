@@ -4,7 +4,8 @@ import Link from 'next/link';
 import { Download, Eye, Printer, Search } from 'lucide-react';
 import type { EstadoRequisicion, Requisicion } from '@/types';
 import { Badge, EstadoBadge } from '@/components/ui/Badge';
-import { ESTADOS, accionesVencidas, csv, fmtFecha } from '@/lib/utils';
+import { ESTADOS, accionesVencidas, fmtFecha } from '@/lib/utils';
+import { fechaCorta, generarCsv, sufijoFecha } from '@/lib/csv';
 
 interface Props {
   datos: Requisicion[];
@@ -41,13 +42,23 @@ export default function RequisicionTable({ datos, mostrarSolicitante = true, exp
   const cambia = (fn: () => void) => { fn(); setPag(1); };
 
   const descargar = () => {
-    const filas: string[][] = [['Folio', 'Fecha', 'Solicitante', 'Departamento', 'Estado', 'Descripción', 'Técnica', 'Causa raíz', 'Causa eliminada']].concat(
-      filtradas.map((r) => [r.folio, r.fechaRegistro, r.solicitante, r.departamento, ESTADOS[r.estado].label, r.descripcion, r.tecnicaEstadistica, r.causaRaiz, r.cierre ? (r.cierre.causaEliminada ? 'Sí' : 'No') : '']),
-    );
-    const blob = new Blob(['﻿' + csv(filas)], { type: 'text/csv;charset=utf-8' });
+    const filas: (string | number)[][] = [[
+      'Folio', 'Fecha de registro', 'Solicitante', 'Departamento', 'Estado', 'Descripción', 'Responsable de definir', 'Responsable de verificar',
+      '¿Requiere acción correctiva?', 'Técnica estadística', 'Causa raíz', 'Acción a realizar',
+      'Acciones del plan', 'Acciones completadas', 'Acciones vencidas', 'Evidencias', 'Fecha de cierre', 'Causa eliminada', 'Última actualización',
+    ]];
+    for (const r of filtradas) {
+      filas.push([
+        r.folio, fechaCorta(r.fechaRegistro), r.solicitante, r.departamento, ESTADOS[r.estado].label, r.descripcion, r.responsableDefinir, r.responsableVerificar,
+        r.requiereAC === null ? '' : r.requiereAC ? 'Sí' : 'No', r.tecnicaEstadistica, r.causaRaiz, r.accionRealizar,
+        r.planAccion.length, r.planAccion.filter((x) => x.completado).length, accionesVencidas(r), r.evidencias.length,
+        fechaCorta(r.cierre?.fechaCierre), r.cierre ? (r.cierre.causaEliminada ? 'Sí' : 'No') : '', fechaCorta(r.actualizada),
+      ]);
+    }
+    const blob = new Blob([generarCsv(filas)], { type: 'text/csv;charset=utf-8' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = 'requisiciones-ac.csv';
+    a.download = `requisiciones-ac-${sufijoFecha()}.csv`;
     a.click();
     URL.revokeObjectURL(a.href);
   };

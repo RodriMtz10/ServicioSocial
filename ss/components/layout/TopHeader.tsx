@@ -5,6 +5,7 @@ import { cerrarSesion } from '@/lib/cerrarSesion';
 import Link from 'next/link';
 import { useUsuario } from '@/lib/useUsuario';
 import BotonTema from '@/components/ui/BotonTema';
+import Avatar from '@/components/ui/Avatar';
 
 export default function TopHeader({ onMenu }: { onMenu?: () => void }) {
   const [isOpen, setIsOpen] = useState(false);
@@ -55,9 +56,7 @@ export default function TopHeader({ onMenu }: { onMenu?: () => void }) {
           aria-label="Menú de mi perfil"
           className="flex items-center space-x-3 p-1.5 rounded-full hover:bg-gray-50 border border-gray-200 transition-all cursor-pointer focus:outline-none"
         >
-          <div className="w-8 h-8 rounded-full bg-[#0F3470] text-amber-400 font-bold flex items-center justify-center text-xs shadow-xs">
-            {userName.split(' ').map(n => n[0]).join('').slice(0, 2)}
-          </div>
+          <Avatar nombre={userName} foto={usuario?.foto} />
           <div className="text-left hidden sm:block pr-1">
             <p className="text-xs font-bold text-gray-800 leading-tight">{userName}</p>
             <p className="text-[10px] text-gray-500 capitalize">
@@ -73,7 +72,7 @@ export default function TopHeader({ onMenu }: { onMenu?: () => void }) {
         {isOpen && (
           <div className="absolute right-0 mt-2 w-72 max-w-[calc(100vw-2rem)] bg-white rounded-2xl shadow-2xl border border-gray-100 py-2 z-50 anim-pop-top">
             <div className="px-4 py-3 border-b border-gray-100 bg-gray-50/50">
-              <p className="text-xs font-bold text-gray-800">{userName}</p>
+              <div className="flex items-center gap-3 mb-2"><Avatar nombre={userName} foto={usuario?.foto} clase="w-12 h-12 text-sm" /><p className="text-xs font-bold text-gray-800">{userName}</p></div>
               <p className="text-[11px] text-gray-500 font-mono mt-0.5">{userEmail}</p>
               <div className="mt-2 inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold bg-blue-50 text-[#0F3470]">
                 {role === 'admin' ? '🛡️ Rol Administrador (SGI)' : '👨‍🏫 Rol Docente'}
@@ -87,7 +86,7 @@ export default function TopHeader({ onMenu }: { onMenu?: () => void }) {
             </div>
 
             <div className="border-t border-gray-100 mt-2 pt-1">
-              <Link href="/dashboard/cuenta" onClick={() => setIsOpen(false)} className="block w-full text-left px-4 py-3 sm:py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50">Mi perfil: datos y contraseña</Link>
+              <Link href="/dashboard/cuenta" onClick={() => setIsOpen(false)} className="block w-full text-left px-4 py-3 sm:py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50">Mi perfil: foto, datos y contraseña</Link>
               <button
                 onClick={handleLogout}
                 className="w-full text-left px-4 py-2 text-xs font-semibold text-red-600 hover:bg-red-50 flex items-center space-x-2 transition-colors cursor-pointer"

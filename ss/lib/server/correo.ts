@@ -44,3 +44,19 @@ export async function enviarCodigo(correo: string, codigo: string, proposito: Pr
     throw new ErrorHttp(503, 'No pudimos enviar el correo. Inténtalo de nuevo en unos minutos.');
   }
 }
+
+/** Correo genérico (avisos). Sin SMTP_HOST: en desarrollo se imprime en la terminal; en producción devuelve false. */
+export async function enviarCorreo(para: string, asunto: string, texto: string, html?: string): Promise<boolean> {
+  if (!process.env.SMTP_HOST) {
+    if (process.env.NODE_ENV === 'production') return false;
+    console.log(`\n[correo · modo desarrollo] Para ${para} — ${asunto}\n${texto}\n`);
+    return true;
+  }
+  try {
+    await (await obtenerTransporte()).sendMail({ from: process.env.SMTP_FROM || process.env.SMTP_USER || 'no-reply@localhost', to: para, subject: asunto, text: texto, html: html ?? `<pre style="font-family:Arial,sans-serif;white-space:pre-wrap">${texto.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]!)}</pre>` });
+    return true;
+  } catch (e) {
+    console.error('[correo] no se pudo enviar a', para, e instanceof Error ? e.message : e);
+    return false;
+  }
+}

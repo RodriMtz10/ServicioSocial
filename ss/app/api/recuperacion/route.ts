@@ -3,6 +3,7 @@ import { ErrorHttp, json, leerJson, manejar } from '@/lib/server/http';
 import { ipDe, limitar } from '@/lib/server/limite';
 import { codigoCoincide, MAX_INTENTOS_CODIGO } from '@/lib/server/verificacion';
 import { hashPassword } from '@/lib/security';
+import { auditar } from '@/lib/server/auditoria';
 import { recuperarSchema } from '@/lib/validacion';
 
 export const dynamic = 'force-dynamic';
@@ -36,5 +37,6 @@ export const POST = (req: Request) => manejar(async () => {
       data: { passwordHash: await hashPassword(d.password), credencialesActualizadas: new Date(), intentosFallidos: 0, bloqueadoHasta: null },
     });
   });
+  await auditar({ nombre: d.correo }, 'recuperacion.password', 'usuario', null, 'Contraseña restablecida con código', ipDe(req.headers));
   return json({ ok: true });
 });

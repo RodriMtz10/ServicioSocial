@@ -8,6 +8,7 @@ import { cerrarSesion } from '@/lib/cerrarSesion';
 import { useUsuario } from '@/lib/useUsuario';
 import { useRequisiciones } from '@/lib/store';
 import { LogoTecnm } from '@/components/ui/Logo';
+import Avatar from "@/components/ui/Avatar";
 
 export default function Sidebar({ abierto = false, onCerrar = () => {} }: { abierto?: boolean; onCerrar?: () => void }) {
   const pathname = usePathname();
@@ -68,6 +69,16 @@ export default function Sidebar({ abierto = false, onCerrar = () => {} }: { abie
       icon: (
         <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
+        </svg>
+      ),
+      roles: ['admin']
+    },
+    {
+      label: 'Bitácora (auditoría)',
+      href: '/dashboard/auditoria',
+      icon: (
+        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
         </svg>
       ),
       roles: ['admin']
@@ -145,9 +156,7 @@ export default function Sidebar({ abierto = false, onCerrar = () => {} }: { abie
       <div className="p-4 border-t border-blue-900/50">
         <div className="flex items-center justify-between p-2 rounded-xl bg-white/5 border border-white/10">
           <div className="flex items-center space-x-2">
-            <div className="w-8 h-8 rounded-full bg-blue-500/30 text-white flex items-center justify-center text-xs font-bold border border-white/20">
-              {userName.split(' ').map(n => n[0]).join('').slice(0, 2)}
-            </div>
+            <Avatar nombre={userName} foto={usuario?.foto} colores="bg-blue-500/30 text-white border border-white/20" />
             <div className="max-w-[110px] overflow-hidden">
               <p className="text-xs font-bold text-white truncate">{userName}</p>
               <p className="text-[10px] text-blue-200 capitalize truncate">

@@ -8,7 +8,7 @@ export function useUsuario() {
   const u = data?.user;
   return {
     cargando: status === 'loading',
-    usuario: u ? { id: u.id, nombre: u.name, correo: u.email, rol: u.role as Role, departamento: u.department, puesto: u.puesto } : null,
+    usuario: u ? { id: u.id, nombre: u.name, correo: u.email, rol: u.role as Role, departamento: u.department, puesto: u.puesto, foto: u.foto ?? null } : null,
     esAdmin: u?.role === 'admin',
   };
 }
